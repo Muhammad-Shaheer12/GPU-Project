@@ -1,73 +1,48 @@
 import json
 import numpy as np
-import threading
-from queue import Queue
 
-class FastYelpDataLoader:
-    def __init__(self, json_path, tokenizer, batch_size=2048, max_length=128, prefetch_batches=100):
+class OfflinePreProcessor:
+    def __init__(self, json_path, output_name, tokenizer, max_length=128):
         self.json_path = json_path
+        self.output_name = output_name
         self.tokenizer = tokenizer
-        
-        # GPU constraints (VRAM limit)
-        self.batch_size = batch_size
         self.max_length = max_length
-        
-        # CPU/RAM constraints (System RAM utilization)
-        # prefetch_batches=100 means we hold 100 fully prepared batches in system RAM
-        self.queue = Queue(maxsize=prefetch_batches) 
-        
-        # A special marker to tell the GPU when the dataset is finished
-        self._STOP_MARKER = object() 
 
-    def _data_preparation_worker(self):
-        """This runs in the background. It reads disk, tokenizes, and fills the queue."""
-        X_batch_list = []
-        y_batch_list = []
-
+    def run(self, build_vocab_samples=500000):
+        X_all = []
+        y_all = []
+        
+        print(f"Step 1: Building Vocabulary from {self.json_path}...")
+        # (Optional: Read a subset to build vocab fast)
         with open(self.json_path, 'r', encoding='utf-8') as f:
-            for line in f:
+            sample_texts = []
+            for i, line in enumerate(f):
+                review = json.loads(line)
+                sample_texts.append(review.get('text', ''))
+                if i >= build_vocab_samples: break 
+            self.tokenizer.build_vocab(sample_texts)
+        
+        print(f"Vocabulary Size: {self.tokenizer.vocab_size}")
+
+        print("Step 2: Tokenizing full dataset...")
+        with open(self.json_path, 'r', encoding='utf-8') as f:
+            for i, line in enumerate(f):
                 try:
                     review = json.loads(line)
                     text = review.get('text', '')
+                    # Yelp ratings are 1-5.
                     rating = int(review.get('stars', 3))
                     
-                    encoded_text = self.tokenizer.encode(text, self.max_length)
+                    X_all.append(self.tokenizer.encode(text, self.max_length))
+                    y_all.append(rating)
                     
-                    X_batch_list.append(encoded_text)
-                    y_batch_list.append(rating)
-
-                    if len(X_batch_list) == self.batch_size:
-                        X_batch = np.array(X_batch_list, dtype=np.int32)
-                        y_batch = np.array(y_batch_list, dtype=np.int32)
-                        
-                        # Shove it into system RAM. 
-                        # If the queue is full (100 batches), this thread automatically pauses 
-                        # until the GPU takes one out.
-                        self.queue.put((X_batch, y_batch))
-                        
-                        X_batch_list = []
-                        y_batch_list = []
-                        
-                except json.JSONDecodeError:
+                    if i % 100000 == 0:
+                        print(f"Processed {i} reviews...")
+                except:
                     continue
-                    
-        # When the file is completely read, put the stop marker in the queue
-        self.queue.put(self._STOP_MARKER)
 
-    def get_batches(self):
-        """The main thread calls this to instantly get data for the GPU."""
-        
-        # 1. Start the background worker thread
-        worker = threading.Thread(target=self._data_preparation_worker)
-        worker.daemon = True # Ensures thread dies if the main script crashes
-        worker.start()
-
-        # 2. Continually pop prepared batches from the queue
-        while True:
-            batch = self.queue.get()
-            
-            # If we hit the marker, the file is done
-            if batch is self._STOP_MARKER:
-                break
-                
-            yield batch
+        print("Step 3: Saving binary file...")
+        # Save the binary file right here in the main/ directory.
+        output_path = f"{self.output_name}.npz"
+        np.savez_compressed(output_path, X=np.array(X_all, dtype=np.int32), y=np.array(y_all, dtype=np.int32))
+        print(f"Done! Created {output_path} inside the main/ directory.")
