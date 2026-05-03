@@ -20,6 +20,28 @@ The project follows a strict **Host/Device** architecture to maximize hardware e
 
 ---
 
+## Kernals
+
+i. Token Padding & Truncation: Implements a flat 1D memory layout and 1-thread-per-token mapping to handle sequence lengths while ensuring contiguous memory access.
+
+ii. Vectorized Embedding Lookup: Utilizes a 2D thread grid and float4 vectorized reads to maximize global memory bandwidth with built-in out-of-vocabulary handling.
+
+iii. Sinusoidal Positional Encoding: Applies Transformer-based positional formulas via residual addition using hardware-accelerated logarithmic identities for optimized computation.
+
+iv. Weighted Mean Pooling: Executes block-level parallel reductions through binary tree summation to calculate weighted averages within partitioned shared memory.
+
+v. Bias Addition (Broadcasting): Dynamically broadcasts a 1D bias vector across a 2D tensor using modulo-based column indexing to eliminate memory duplication.
+
+vi. Leaky ReLU Activation: Provides element-wise non-linearity using a configurable alpha multiplier to preserve small gradients and prevent dead neurons.
+
+vii. Batch Normalization Mean: Calculates feature column means via grid-stride loops and warp-level register reductions for high-speed computation.
+
+viii. Batch Normalization Variance: Computes statistical variance using a warp-reduce-sum architecture to maintain maximum register-to-register communication efficiency.
+
+Current Status: All Host-side logic is done. We have successfully tokenized the dataset, trained our baseline model, and extracted the debug tensors.
+
+---
+
 ## File Structure
 The project is organized into modular directories:
 ```text
@@ -51,5 +73,3 @@ Train the PyTorch model to generate the weights and the debug benchmarks.
 4. Run Inference
 Verify that the model logic and weights are working correctly on sample data.
 ```python scripts/inference.py```
-
-Current Status: All Host-side logic is done. We have successfully tokenized the dataset, trained our baseline model, and extracted the debug tensors.
