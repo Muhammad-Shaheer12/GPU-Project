@@ -15,6 +15,18 @@
         }                                                                  \
     } while (0)
 
+// Warp-level argmax using shuffle.
+__device__ void warp_reduce_argmax(float& v, int& idx) {
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        float other_v = __shfl_down_sync(0xFFFFFFFF, v, offset);
+        int other_idx = __shfl_down_sync(0xFFFFFFFF, idx, offset);
+        if (other_v > v) {
+            v = other_v;
+            idx = other_idx;
+        }
+    }
+}
+
 // Kernel 15: argmax per row.
 // Input: probs [batch x classes], Output: argmax indices [batch]
 __global__ void argmax_kernel(const float* __restrict__ input,
@@ -39,27 +51,9 @@ __global__ void argmax_kernel(const float* __restrict__ input,
         }
     }
 
-    extern __shared__ float s_vals[];
-    int* s_idx = reinterpret_cast<int*>(s_vals + blockDim.x);
-
-    s_vals[tid] = local_max;
-    s_idx[tid] = local_idx;
-    __syncthreads();
-
-    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-        if (tid < stride) {
-            float other_val = s_vals[tid + stride];
-            int other_idx = s_idx[tid + stride];
-            if (other_val > s_vals[tid]) {
-                s_vals[tid] = other_val;
-                s_idx[tid] = other_idx;
-            }
-        }
-        __syncthreads();
-    }
-
+    warp_reduce_argmax(local_max, local_idx);
     if (tid == 0) {
-        output[row] = s_idx[0];
+        output[row] = local_idx;
     }
 }
 
@@ -107,11 +101,10 @@ int main() {
 
     CUDA_CHECK(cudaMemcpy(d_input, h_input.data(), h_input.size() * sizeof(float), cudaMemcpyHostToDevice));
 
-    const int threads = 128;
+    const int threads = 32;
     const int blocks = batch;
-    const size_t shared_bytes = threads * sizeof(float) + threads * sizeof(int);
 
-    argmax_kernel<<<blocks, threads, shared_bytes>>>(d_input, d_output, batch, classes);
+    argmax_kernel<<<blocks, threads>>>(d_input, d_output, batch, classes);
 
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
