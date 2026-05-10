@@ -256,10 +256,9 @@ void launch_softmax_row_max(const float* input,
                               float* row_max,
                               int batch,
                               int classes) {
-    const int threads = 128;
+    const int threads = 32;
     const int blocks = batch;
-    const size_t shared_bytes = threads * sizeof(float);
-    softmax_row_max_kernel<<<blocks, threads, shared_bytes>>>(
+    softmax_row_max_kernel<<<blocks, threads>>>(
         input, row_max, batch, classes);
 }
 
@@ -268,10 +267,9 @@ void launch_softmax_row_sum(const float* input,
                               float* row_sum,
                               int batch,
                               int classes) {
-    const int threads = 128;
+    const int threads = 32;
     const int blocks = batch;
-    const size_t shared_bytes = threads * sizeof(float);
-    softmax_row_sum_kernel<<<blocks, threads, shared_bytes>>>(
+    softmax_row_sum_kernel<<<blocks, threads>>>(
         input, row_max, row_sum, batch, classes);
 }
 
@@ -292,9 +290,8 @@ void launch_argmax(const float* input,
                     int* output,
                     int batch,
                     int classes) {
-    const int threads = 128;
+    const int threads = 32;
     const int blocks = batch;
-    const size_t shared_bytes = threads * sizeof(float) + threads * sizeof(int);
-    argmax_kernel<<<blocks, threads, shared_bytes>>>(
+    argmax_kernel<<<blocks, threads>>>(
         input, output, batch, classes);
 }

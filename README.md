@@ -15,7 +15,7 @@ The project follows a strict **Host/Device** architecture:
 2.  **Data Acquisition:** Processed the Yelp Academic Dataset (Customer Reviews).
 3.  **Data Pipeline:** Tokenized 7 million reviews into `yelp_tokenized.npz`.
 4.  **Baseline Training:** Trained the model (`pyModel.py`) to generate weights (`controlled_model_weights.pth`).
-5.  **Kernel Migration:** Stripped 15 CUDA kernels of standalone logic and prepared them for PyTorch integration.
+5.  **Kernel Migration:** Unified all 15 kernels into a single library-style header/source structure, enabling conditional compilation via `#ifndef PIPELINE_BUILD` for flexible testing and integration.
 6.  **Extension Development:** Built a PyBind11 C++ extension (`custom_cuda_ops`) to bridge Python and CUDA.
 7.  **Full Integration:** Replaced all forward pass operations in the model with custom CUDA kernel calls.
 8.  **Verification:** Validated the end-to-end pipeline with real review data, achieving identical accuracy with significant performance gains.
@@ -57,8 +57,11 @@ GPUProject/
 ├── custom_pipeline/          # Integrated Model Logic
 │   ├── pyModel.py            # Model with custom forward pass
 │   └── inference.py          # End-to-end verification script
-├── kernals_stripped/         # Clean CUDA kernels used by the extension
-├── Kernals/                  # Original standalone CUDA source files
+├── Kernals/                  # Source kernels & Shared Utilities
+│   ├── common.h              # Shared CUDA macros & primitives
+│   └── kernelX_...cu         # Individual library-ready kernels
+├── tests/                    # Benchmarking & Validation
+├── profiling_results.md      # Detailed Performance Deep Dive
 ├── scripts/                  # Preprocessing and baseline scripts
 ├── weights/                  # Trained model weights (.pth)
 ├── dataset/                  # Raw Yelp JSON data
