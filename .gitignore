@@ -5,3 +5,10 @@ __pycache__
 **/__pycache__
 scripts/yelp_tokenized.npz
 scripts/cuda_debug_tensors.npz
+custom_ext/build.log
+custom_ext/build/
+custom_ext/custom_cuda_ops.egg-info/
+custom_ext/dist/
+custom_pipeline/execution_time.log
+custom_pipeline/ncu_output.log
+tests/ncu_output.log
