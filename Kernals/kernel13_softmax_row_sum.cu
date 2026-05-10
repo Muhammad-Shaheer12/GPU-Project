@@ -14,6 +14,14 @@
         }                                                                  \
     } while (0)
 
+// Warp-level sum reduction using shuffle.
+__device__ float warp_reduce_sum(float v) {
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        v += __shfl_down_sync(0xFFFFFFFF, v, offset);
+    }
+    return v;
+}
+
 // Kernel 13: compute per-row sum of exp(x - row_max).
 // Input: logits [batch x classes], row_max [batch], Output: row_sum [batch]
 __global__ void softmax_row_sum_kernel(const float* __restrict__ input,
@@ -35,19 +43,9 @@ __global__ void softmax_row_sum_kernel(const float* __restrict__ input,
         local_sum += expf(v - max_val);
     }
 
-    extern __shared__ float sdata[];
-    sdata[tid] = local_sum;
-    __syncthreads();
-
-    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-        if (tid < stride) {
-            sdata[tid] += sdata[tid + stride];
-        }
-        __syncthreads();
-    }
-
+    float sum_val = warp_reduce_sum(local_sum);
     if (tid == 0) {
-        row_sum[row] = sdata[0];
+        row_sum[row] = sum_val;
     }
 }
 
@@ -104,11 +102,10 @@ int main() {
     CUDA_CHECK(cudaMemcpy(d_input, h_input.data(), h_input.size() * sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_row_max, h_row_max.data(), h_row_max.size() * sizeof(float), cudaMemcpyHostToDevice));
 
-    const int threads = 128;
+    const int threads = 32;
     const int blocks = batch;
-    const size_t shared_bytes = threads * sizeof(float);
 
-    softmax_row_sum_kernel<<<blocks, threads, shared_bytes>>>(d_input, d_row_max, d_row_sum, batch, classes);
+    softmax_row_sum_kernel<<<blocks, threads>>>(d_input, d_row_max, d_row_sum, batch, classes);
 
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());

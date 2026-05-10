@@ -15,6 +15,15 @@
         }                                                                  \
     } while (0)
 
+// Warp-level max reduction using shuffle.
+__device__ float warp_reduce_max(float v) {
+    for (int offset = 16; offset > 0; offset >>= 1) {
+        float other = __shfl_down_sync(0xFFFFFFFF, v, offset);
+        v = fmaxf(v, other);
+    }
+    return v;
+}
+
 // Kernel 12: compute per-row max for softmax stability.
 // Input: [batch x classes], Output: [batch]
 __global__ void softmax_row_max_kernel(const float* __restrict__ input,
@@ -35,20 +44,9 @@ __global__ void softmax_row_max_kernel(const float* __restrict__ input,
         local_max = fmaxf(local_max, v);
     }
 
-    // Reduce within the block.
-    extern __shared__ float sdata[];
-    sdata[tid] = local_max;
-    __syncthreads();
-
-    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-        if (tid < stride) {
-            sdata[tid] = fmaxf(sdata[tid], sdata[tid + stride]);
-        }
-        __syncthreads();
-    }
-
+    float max_val = warp_reduce_max(local_max);
     if (tid == 0) {
-        row_max[row] = sdata[0];
+        row_max[row] = max_val;
     }
 }
 
@@ -91,11 +89,10 @@ int main() {
 
     CUDA_CHECK(cudaMemcpy(d_input, h_input.data(), h_input.size() * sizeof(float), cudaMemcpyHostToDevice));
 
-    const int threads = 128;
+    const int threads = 32;
     const int blocks = batch;
-    const size_t shared_bytes = threads * sizeof(float);
 
-    softmax_row_max_kernel<<<blocks, threads, shared_bytes>>>(d_input, d_row_max, batch, classes);
+    softmax_row_max_kernel<<<blocks, threads>>>(d_input, d_row_max, batch, classes);
 
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
