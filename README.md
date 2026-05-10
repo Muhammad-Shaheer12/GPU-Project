@@ -96,6 +96,12 @@ python scripts/preprocessing.py
 python custom_pipeline/pyModel.py  # Runs training mode
 ```
 
+### 4. Run Unified Kernel Tests
+Verify mathematical correctness (Differential Testing against PyTorch) and benchmark the execution speed of all 17 custom CUDA kernels:
+```powershell
+python tests/run_all_tests.py
+```
+
 ---
 
 **Current Status:** All 15 kernels are fully integrated and verified. The system is capable of performing high-speed sentiment inference on millions of reviews using native GPU acceleration.

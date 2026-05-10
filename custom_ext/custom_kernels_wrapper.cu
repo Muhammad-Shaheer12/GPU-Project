@@ -117,6 +117,20 @@ __global__ void argmax_kernel(const float* __restrict__ input,
                               int batch,
                               int classes);
 
+// K16: fused_bias_leaky_relu
+__global__ void bias_leaky_relu_kernel(const float* __restrict__ input,
+                                       const float* __restrict__ bias,
+                                       float* __restrict__ output,
+                                       int rows,
+                                       int cols,
+                                       float alpha);
+
+// K17: fused_softmax
+__global__ void softmax_fused_kernel(const float* __restrict__ input,
+                                     float* __restrict__ output,
+                                     int batch,
+                                     int classes);
+
 
 // ============================================================
 // Launch wrapper functions (called from custom_ops.cpp)
@@ -294,4 +308,26 @@ void launch_argmax(const float* input,
     const int blocks = batch;
     argmax_kernel<<<blocks, threads>>>(
         input, output, batch, classes);
+}
+
+void launch_fused_bias_leaky_relu(const float* input,
+                                  const float* bias,
+                                  float* output,
+                                  int rows,
+                                  int cols,
+                                  float alpha) {
+    const int threads = 256;
+    int total = rows * cols;
+    int blocks = (total + threads - 1) / threads;
+    // Fused kernel uses float4, so we adjust blocks if needed, but the kernel handles tailing
+    bias_leaky_relu_kernel<<<blocks, threads>>>(input, bias, output, rows, cols, alpha);
+}
+
+void launch_fused_softmax(const float* input,
+                           float* output,
+                           int batch,
+                           int classes) {
+    const int threads = 32;
+    size_t shared_bytes = 2 * sizeof(float);
+    softmax_fused_kernel<<<batch, threads, shared_bytes>>>(input, output, batch, classes);
 }

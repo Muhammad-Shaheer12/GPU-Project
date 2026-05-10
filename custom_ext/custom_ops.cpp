@@ -51,6 +51,8 @@ void launch_softmax_normalize(const float* input, const float* row_max,
                                 int batch, int classes);
 
 void launch_argmax(const float* input, int* output, int batch, int classes);
+void launch_fused_bias_leaky_relu(const float* input, const float* bias, float* output, int rows, int cols, float alpha);
+void launch_fused_softmax(const float* input, float* output, int batch, int classes);
 
 
 // ============================================================
@@ -399,6 +401,38 @@ torch::Tensor argmax(torch::Tensor input) {
     return output;
 }
 
+// ============================================================
+// K16: fused_bias_leaky_relu
+// ============================================================
+torch::Tensor fused_bias_leaky_relu(torch::Tensor input,
+                                     torch::Tensor bias,
+                                     float alpha) {
+    input = ensure_float_cuda(input, "input");
+    bias = ensure_float_cuda(bias, "bias");
+    int rows = input.size(0);
+    int cols = input.size(1);
+    auto output = torch::empty_like(input);
+    launch_fused_bias_leaky_relu(input.data_ptr<float>(),
+                                  bias.data_ptr<float>(),
+                                  output.data_ptr<float>(),
+                                  rows, cols, alpha);
+    return output;
+}
+
+// ============================================================
+// K17: fused_softmax
+// ============================================================
+torch::Tensor fused_softmax(torch::Tensor input) {
+    input = ensure_float_cuda(input, "input");
+    int batch = input.size(0);
+    int classes = input.size(1);
+    auto output = torch::empty_like(input);
+    launch_fused_softmax(input.data_ptr<float>(),
+                          output.data_ptr<float>(),
+                          batch, classes);
+    return output;
+}
+
 
 // ============================================================
 // PyBind11 module registration
@@ -419,4 +453,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("softmax_row_sum", &softmax_row_sum, "K13: Softmax row-wise sum of exp");
     m.def("softmax_normalize", &softmax_normalize, "K14: Softmax normalize");
     m.def("argmax", &argmax, "K15: Argmax per row");
+    m.def("fused_bias_leaky_relu", &fused_bias_leaky_relu, "K16: Fused bias + leaky ReLU");
+    m.def("fused_softmax", &fused_softmax, "K17: Fused single-pass softmax");
 }

@@ -6,6 +6,7 @@ import sys
 
 # Ensure we can import ControlledModel
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "custom_pipeline"))
+
 from pyModel import ControlledModel
 
 def benchmark_full_model():
@@ -14,12 +15,29 @@ def benchmark_full_model():
         print("CUDA not available. Benchmarking on CPU is not recommended for this test.")
         return
 
-    # Setup model parameters
-    vocab_size = 50000
+    # 1. Setup Paths and Model parameters
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    WEIGHTS_PATH = os.path.join(script_dir, "..", "weights", "controlled_model_weights.pth")
+    DATA_PATH = os.path.join(script_dir, "..", "scripts", "yelp_tokenized.npz")
+    
+    if os.path.exists(DATA_PATH):
+        data = np.load(DATA_PATH)
+        vocab_size = int(np.max(data['X'])) + 1
+    else:
+        vocab_size = 50000 # Fallback
+        print(f"Warning: Data not found at {DATA_PATH}. Using random initialization.")
+        
     batch_size = 2048
     seq_len = 128
     
     model = ControlledModel(vocab_size=vocab_size).to(device)
+    
+    if os.path.exists(WEIGHTS_PATH):
+        print(f"Loading weights from {WEIGHTS_PATH}...")
+        model.load_state_dict(torch.load(WEIGHTS_PATH, map_location=device))
+    else:
+        print(f"Warning: Weights not found at {WEIGHTS_PATH}. Using random initialization.")
+        
     model.eval()
     
     # Create sample inputs

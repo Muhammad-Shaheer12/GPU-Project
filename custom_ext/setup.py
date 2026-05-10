@@ -31,6 +31,8 @@ setup(
                 os.path.join(kernals_dir, 'kernel13_softmax_row_sum.cu'),
                 os.path.join(kernals_dir, 'kernel14_softmax_normalize.cu'),
                 os.path.join(kernals_dir, 'kernel15_argmax.cu'),
+                os.path.join(kernals_dir, 'kernel16_fused_bias_relu.cu'),
+                os.path.join(kernals_dir, 'kernel17_fused_softmax.cu'),
             ],
             include_dirs=[kernals_dir],
             extra_compile_args={'cxx': ['-O3'],
