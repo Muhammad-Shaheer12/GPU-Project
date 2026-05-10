@@ -1,65 +1,75 @@
 # GPU-Accelerated Sentiment Analysis Engine
+---
 
-**Team Members:** Nishat Ahmad (2023574) | Muhammad Shaheer (2023508)  
-**Repository:** [https://github.com/Nishat-Ahmad/GPU-Project](https://github.com/Nishat-Ahmad/GPU-Project)
+## Project goal
+We are developing a high-performance sentiment engine using custom CUDA kernels to predict 1–5 star ratings from 7M Yelp reviews.
+
+The project follows a strict **Host/Device** architecture to maximize hardware efficiency:
+*   **The Host (Python):** It cleans text, tokenizing words, and manages dataflow.
+*   **The Device (CUDA):** All heavy mathematical operations—including 2D embedding lookups, matrix multiplications (GEMM), and the final softmax prediction—are handled by 15 custom kernels written from scratch in CUDA C++.
 
 ---
 
-## Scope and Motivation
-
-### Why we chose this project
-As Artificial Intelligence students, we wanted to learn more about the backend execution and underlying libraries of how ML models are actually implemented. Standard frameworks like PyTorch handle this well but carry significant overhead. This project bypasses that overhead by processing large batches of tokenized text through a custom-built CUDA pipeline to generate 1-to-5-star sentiment ratings entirely from scratch.
-
-### Use Cases & Benefits
-This project is designed for analyzing large datasets. It can be utilized by companies to perform market research and sentiment analysis. The massive parallelism of the GPU enables real-time sentiment tracking across multiple streams of data, making it highly effective for monitoring live social media feeds.
-
----
-
-## Overall Structure and Working
-
-The system is designed as a streamlined pipeline, distinctly separated into **Host (Python)** and **Device (C++/CUDA)** boundaries.
-
-### The Non-GPU Part (Host / Wrapper / Baseline)
-To maximize time spent on GPU optimization rather than boilerplate data parsing, the Host environment is implemented in Python. It acts as our data orchestrator, baseline model, and testing framework:
-
-* **Data Loader & Baseline Model:** We use standard Python libraries (PyTorch, NumPy, Pandas) to handle reading CSV datasets and converting raw text into integer token IDs.
-* **CUDA Integration Bridge:** We utilize a binding framework (like PyCUDA or PyTorch Custom C++ Extensions) to interface between the Python host and the GPU.
-* **Execution Flow:** The Python host allocates memory, pushes the token batches to the GPU, and dispatches the grid/block configurations. Instead of calling native PyTorch functions, the host sequentially calls our custom-written `.cu` kernels.
-
-### The GPU Part (Device / Accelerators)
-This is the core of the project. We systematically swap out standard Python functions with our specialized CUDA kernels. 
-
-#### The 3-Phase Kernel Pipeline:
-1.  **Data Preparation:** Kernels for padding sentences, performing 2D Embedding Lookups, and injecting Positional Encoding.
-2.  **Feature Extraction (Neural Layers):** Kernels for Weighted Mean Pooling (compressing sequences into vectors), Matrix Multiplication (GEMM) for the hidden layers, Non-linear Activation (Leaky ReLU), and Batch Normalization (Mean, Variance, and Apply kernels).
-3.  **Classification:** A final Matrix-Vector (GEMV) projection, followed by a 3-step Softmax pipeline (Row Max, Row Sum, Division) to calculate probabilities, and a parallel Argmax kernel to determine the final 1–5-star prediction.
-
-**Pipeline Interaction:** The Python script loads a batch of sentences and pushes the tensors to the GPU. The host sequentially fires the custom CUDA kernels, processing the data entirely in VRAM. Once the final kernel finishes, the host retrieves a single array of integers representing the final star ratings.
+## Progress
+1.  **Environment Setup:** We first set up the libraries and the software required for using Python with CUDA and C so that they don't mess up later on.
+2.  **Data Acquisition:** We downloaded the Yelp Academic Dataset (Customer Reviews) and extracted the raw JSON files. (link: https://business.yelp.com/data/resources/open-dataset/)
+3.  **Data Pipeline:** We unzipped the data and ran our custom scripts for data loading and tokenization. This produced `yelp_tokenized.npz`, a dense binary file of tokens for the model.
+4.  **Model Construction:** We implemented the actual ML model (`pyModel.py`) in python to establish our 5-point rating logic.
+5.  **Baseline Training:** We trained the model on 7 million reviews to generate the weights and debug tensors.
+6.  **Inference:** We developed a small inference file to verify our saved model weights.
 
 ---
 
-## Implementation Strategy
+## Kernals
 
-We are executing this project in three distinct phases:
+i. Token Padding & Truncation: Implements a flat 1D memory layout and 1-thread-per-token mapping to handle sequence lengths while ensuring contiguous memory access.
 
-1.  **Host Infrastructure and Baseline Operations:** Develop the Python host environment (data loading/tokenization) and establish the integration bridge. Implement and test the initial element-wise CUDA kernels (Bias Add, Leaky ReLU, and Positional Encoding).
-2.  **Core GPU Acceleration:** Focus on heavy mathematical workloads and complex parallel patterns. Replace Python layers with custom CUDA implementations for Tiled Matrix Multiplication (GEMM) and tree-based Parallel Reductions for Batch Normalization and Softmax.
-3.  **Integration, Verification, and Optimization:** Link the end-to-end pipeline. Verify GPU outputs against the Python "Golden Reference" for mathematical correctness. Measure throughput speedups and apply advanced memory optimizations (CUDA Streams, Kernel Fusion).
+ii. Vectorized Embedding Lookup: Utilizes a 2D thread grid and float4 vectorized reads to maximize global memory bandwidth with built-in out-of-vocabulary handling.
+
+iii. Sinusoidal Positional Encoding: Applies Transformer-based positional formulas via residual addition using hardware-accelerated logarithmic identities for optimized computation.
+
+iv. Weighted Mean Pooling: Executes block-level parallel reductions through binary tree summation to calculate weighted averages within partitioned shared memory.
+
+v. Bias Addition (Broadcasting): Dynamically broadcasts a 1D bias vector across a 2D tensor using modulo-based column indexing to eliminate memory duplication.
+
+vi. Leaky ReLU Activation: Provides element-wise non-linearity using a configurable alpha multiplier to preserve small gradients and prevent dead neurons.
+
+vii. Batch Normalization Mean: Calculates feature column means via grid-stride loops and warp-level register reductions for high-speed computation.
+
+viii. Batch Normalization Variance: Computes statistical variance using a warp-reduce-sum architecture to maintain maximum register-to-register communication efficiency.
+
+Current Status: All Host-side logic is done. We have successfully tokenized the dataset, trained our baseline model, and extracted the debug tensors.
 
 ---
 
-## CUDA Techniques Utilized
+## File Structure
+The project is organized into modular directories:
+```text
+    GPUProject/
+    ├── dataset/                      # Yelp dataset
+    ├── Kernals/                      # all the kernals that we wrote
+    ├── scripts/                      # Host files
+    │   ├── dataloader.py             # Batching and memory management
+    │   ├── preprocessing.py          # Entry point for the tokenization pipeline
+    │   ├── pyModel.py                # The PyTorch model
+    │   ├── tokenizer.py              # Text cleaning and word-to-ID mapping
+    │   ├── inference.py              # Inference engine using saved weights
+    │   ├── yelp_tokenized.npz        # Compressed binary dataset
+    │   └── cuda_debug_tensors.npz    # Intermediate tensors for CUDA verification
+    ├── weights/
+    │   └── controlled_model_weights.pth # Trained model weights
+    ├── README.md
+    └── .gitignore
+```
+How to run:
+1. Pre-processing & Tokenization
+Convert 7 million reviews into a dense binary format.
+```python scripts/preprocessing.py```
 
-* **Memory Coalescing (Chapter 6):** Structuring thread accesses during the Embedding Lookup to ensure adjacent threads read adjacent memory addresses, utilizing full warp bandwidth.
-* **Tiled Shared Memory (Chapters 4 & 5):** Utilizing `__shared__` memory for the Multi-Layer Perceptron (GEMM) kernels to minimize slow global memory fetches.
-* **Parallel Reduction (Chapter 10):** Implementing tree-based reductions with warp-level synchronization (`__shfl_down_sync`) for the Mean Pooling, Batch Normalization, and Softmax layers.
+2. Train the python Model
+Train the PyTorch model to generate the weights and the debug benchmarks.
+```python scripts/pyModel.py```
 
----
-
-## Verification and Benchmarking
-
-### Verification of Correctness
-We utilize a "Golden Reference" script in Python using PyTorch. By passing a specific batch of text through both the PyTorch baseline model and our custom CUDA engine, we use standard C++ assertions to compare the output tensors of every single kernel. If the GPU floating-point outputs match the PyTorch outputs within a small tolerance, the implementation is considered mathematically verified.
-
-### Measuring Speed Improvements
-Performance is measured by calculating the total **"Sentences Processed Per Second"** using `cudaEvent_t` timers, comparing our custom GPU pipeline against a sequential CPU implementation. Additionally, we use **Nsight Compute** to profile the GPU, measure Arithmetic Intensity, and track Global Memory hit rates to confirm optimization success.
+4. Run Inference
+Verify that the model logic and weights are working correctly on sample data.
+```python scripts/inference.py```
