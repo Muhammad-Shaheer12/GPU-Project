@@ -43,7 +43,9 @@ The project follows a strict **Host/Device** architecture:
 12. **Softmax Row Max**: Computes per-row maximums for numerical stability.
 13. **Softmax Row Sum**: Calculates the sum of exponentials ($e^{x - max}$) using shared memory reduction.
 14. **Softmax Normalize**: Produces final probabilities by normalizing against the row sum.
-15. **Argmax**: Determines the final 1-5 star prediction by finding the index of the maximum probability.
+15. **Argmax**: Determines the final 1-5 star prediction using warp-level reductions.
+16. **Fused Bias + Leaky ReLU**: Combines memory-bound operations into a single kernel for bandwidth optimization.
+17. **Fused Softmax**: A high-efficiency single-pass kernel that handles max, sum, and normalization in one grid launch.
 
 ---
 
@@ -61,8 +63,10 @@ GPUProject/
 │   ├── common.h              # Shared CUDA macros & primitives
 │   └── kernelX_...cu         # Individual library-ready kernels
 ├── tests/                    # Benchmarking & Validation
-├── profiling_results.md      # Detailed Performance Deep Dive
+├── performance_report.md     # Consolidated Benchmarking & Profiling results
 ├── scripts/                  # Preprocessing and baseline scripts
+│   ├── pyModel.py            # Baseline model (pure PyTorch)
+│   └── inference.py          # Baseline inference script
 ├── weights/                  # Trained model weights (.pth)
 ├── dataset/                  # Raw Yelp JSON data
 └── README.md

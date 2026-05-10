@@ -1,17 +1,7 @@
 #include "common.h"
 #include <vector>
 
-// Warp-level argmax using shuffle.
-__device__ void warp_reduce_argmax(float& v, int& idx) {
-    for (int offset = 16; offset > 0; offset >>= 1) {
-        float other_v = __shfl_down_sync(0xFFFFFFFF, v, offset);
-        int other_idx = __shfl_down_sync(0xFFFFFFFF, idx, offset);
-        if (other_v > v) {
-            v = other_v;
-            idx = other_idx;
-        }
-    }
-}
+
 
 // Kernel 15: argmax per row.
 // Input: probs [batch x classes], Output: argmax indices [batch]

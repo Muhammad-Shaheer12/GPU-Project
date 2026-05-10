@@ -42,9 +42,7 @@ class ControlledModel(nn.Module):
         intermediates = {}
         use_custom = custom_cuda_ops is not None
         
-        # -------------------------------------------------------------
         # K1: CUSTOM CUDA KERNEL - pad_truncate
-        # -------------------------------------------------------------
         if lengths is not None and use_custom:
             x = custom_cuda_ops.pad_truncate(
                 x.to(torch.int32), 
@@ -55,9 +53,7 @@ class ControlledModel(nn.Module):
             x = x.to(torch.long)
         
         if use_custom:
-            # ==========================================================
             # K2: CUSTOM CUDA KERNEL - embedding_lookup (word embeddings)
-            # ==========================================================
             batch = x.size(0)
             seq_len = x.size(1)
             
@@ -70,9 +66,7 @@ class ControlledModel(nn.Module):
             )
             w_emb = w_emb.view(batch, seq_len, self.embed_dim)
             
-            # ==========================================================
             # K2 again: embedding_lookup (positional embeddings)
-            # ==========================================================
             pos_ids = torch.arange(seq_len, device=x.device).to(torch.int32)
             p_emb_flat = custom_cuda_ops.embedding_lookup(
                 pos_ids,
@@ -86,9 +80,7 @@ class ControlledModel(nn.Module):
             x_emb = w_emb + p_emb
             if extract_intermediates: intermediates['01_embedding_out'] = x_emb.detach().cpu().numpy()
             
-            # ==========================================================
             # K4: CUSTOM CUDA KERNEL - weighted_mean_pooling
-            # ==========================================================
             # pool_weight is [max_len, 1] - broadcast to [batch, seq_len]
             pw = self.pool_weight.data.squeeze(-1)  # [max_len]
             pw_batch = pw.unsqueeze(0).expand(batch, -1).contiguous()  # [batch, seq_len]
@@ -99,9 +91,7 @@ class ControlledModel(nn.Module):
             )
             if extract_intermediates: intermediates['02_pooled_out'] = pooled.detach().cpu().numpy()
             
-            # ==========================================================
             # K10 + K5: CUSTOM CUDA KERNELS - gemm_tiled + bias_add (fc1)
-            # ==========================================================
             # nn.Linear computes: output = input @ weight.T + bias
             # Our GEMM kernel does C = A * B, so we need weight transposed
             fc1_weight_t = self.fc1.weight.data.t().contiguous()  # [embed_dim, hidden_dim]
@@ -109,9 +99,7 @@ class ControlledModel(nn.Module):
             hidden = custom_cuda_ops.bias_add(hidden, self.fc1.bias.data)
             if extract_intermediates: intermediates['03_fc1_out'] = hidden.detach().cpu().numpy()
             
-            # ==========================================================
             # K7 + K8 + K9: CUSTOM CUDA KERNELS - batchnorm pipeline
-            # ==========================================================
             bn_mean = custom_cuda_ops.batchnorm_mean(hidden.contiguous())
             bn_var = custom_cuda_ops.batchnorm_var(hidden.contiguous(), bn_mean)
             hidden_bn = custom_cuda_ops.batchnorm_apply(
@@ -124,15 +112,11 @@ class ControlledModel(nn.Module):
             )
             if extract_intermediates: intermediates['04_bn_out'] = hidden_bn.detach().cpu().numpy()
             
-            # ==========================================================
             # K6: CUSTOM CUDA KERNEL - leaky_relu
-            # ==========================================================
             act_out = custom_cuda_ops.leaky_relu(hidden_bn.contiguous(), 0.01)
             if extract_intermediates: intermediates['05_act_out'] = act_out.detach().cpu().numpy()
             
-            # ==========================================================
             # K11: CUSTOM CUDA KERNEL - logit_projection (fc2)
-            # ==========================================================
             # logit_projection expects weights as [hidden x classes]
             fc2_weight_t = self.fc2.weight.data.t().contiguous()  # [hidden_dim, 5]
             logits = custom_cuda_ops.logit_projection(
@@ -143,9 +127,7 @@ class ControlledModel(nn.Module):
             logits = custom_cuda_ops.bias_add(logits, self.fc2.bias.data)
             if extract_intermediates: intermediates['06_logits'] = logits.detach().cpu().numpy()
             
-            # ==========================================================
             # K12 + K13 + K14: CUSTOM CUDA KERNELS - softmax pipeline
-            # ==========================================================
             row_max = custom_cuda_ops.softmax_row_max(logits.contiguous())
             row_sum = custom_cuda_ops.softmax_row_sum(logits.contiguous(), row_max)
             probs = custom_cuda_ops.softmax_normalize(logits.contiguous(), row_max, row_sum)

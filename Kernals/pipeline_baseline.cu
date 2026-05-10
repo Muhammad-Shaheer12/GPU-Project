@@ -22,6 +22,8 @@
 #include "kernel13_softmax_row_sum.cu"
 #include "kernel14_softmax_normalize.cu"
 #include "kernel15_argmax.cu"
+#include "kernel16_fused_bias_relu.cu"
+#include "kernel17_fused_softmax.cu"
 
 #define CUBLAS_CHECK(call)                                                 \
     do {                                                                   \
@@ -40,86 +42,6 @@
 #ifndef USE_FUSED_SOFTMAX
 #define USE_FUSED_SOFTMAX 1
 #endif
-
-// Fused bias + leaky ReLU to reduce global memory traffic.
-__global__ void bias_leaky_relu_kernel(const float* __restrict__ input,
-                                       const float* __restrict__ bias,
-                                       float* __restrict__ output,
-                                       int rows,
-                                       int cols,
-                                       float alpha) {
-    int total = rows * cols;
-    int idx4 = blockIdx.x * blockDim.x + threadIdx.x;
-    int base = idx4 * 4;
-
-    if (cols % 4 == 0 && base + 3 < total) {
-        int col_base = base % cols;
-        float4 in = reinterpret_cast<const float4*>(input + base)[0];
-        float4 b = reinterpret_cast<const float4*>(bias + col_base)[0];
-
-        float x0 = in.x + b.x;
-        float x1 = in.y + b.y;
-        float x2 = in.z + b.z;
-        float x3 = in.w + b.w;
-
-        float4 out;
-        out.x = (x0 >= 0.0f) ? x0 : (alpha * x0);
-        out.y = (x1 >= 0.0f) ? x1 : (alpha * x1);
-        out.z = (x2 >= 0.0f) ? x2 : (alpha * x2);
-        out.w = (x3 >= 0.0f) ? x3 : (alpha * x3);
-
-        reinterpret_cast<float4*>(output + base)[0] = out;
-        return;
-    }
-
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= total) {
-        return;
-    }
-
-    int col = idx % cols;
-    float x = input[idx] + bias[col];
-    output[idx] = (x >= 0.0f) ? x : (alpha * x);
-}
-
-__global__ void softmax_fused_kernel(const float* __restrict__ input,
-                                     float* __restrict__ output,
-                                     int batch,
-                                     int classes) {
-    int row = blockIdx.x;
-    int tid = threadIdx.x;
-
-    if (row >= batch) {
-        return;
-    }
-
-    extern __shared__ float sdata[];
-    if (tid == 0) {
-        float max_val = input[row * classes];
-        for (int c = 1; c < classes; ++c) {
-            float v = input[row * classes + c];
-            if (v > max_val) {
-                max_val = v;
-            }
-        }
-
-        float sum_val = 0.0f;
-        for (int c = 0; c < classes; ++c) {
-            sum_val += expf(input[row * classes + c] - max_val);
-        }
-
-        sdata[0] = max_val;
-        sdata[1] = sum_val;
-    }
-    __syncthreads();
-
-    float max_val = sdata[0];
-    float sum_val = sdata[1];
-    for (int c = tid; c < classes; c += blockDim.x) {
-        float v = input[row * classes + c];
-        output[row * classes + c] = expf(v - max_val) / sum_val;
-    }
-}
 
 static void cpu_reference_pipeline(const std::vector<int>& input_tokens,
                                    const std::vector<int>& input_lengths,
