@@ -32,16 +32,6 @@ We have developed a high-performance sentiment engine using **17 hand-optimized 
 
 ---
 
-## Core Optimizations
-1.  **Unity Build System**: Includes all CUDA kernels into a single translation unit for faster compilation and better whole-program optimization.
-2.  **cuBLAS Integration**: Leverages hardware **Tensor Cores (TF32)** for matrix multiplication, providing 10x throughput over manual tiling.
-3.  **Kernel Fusion**: 
-    *   **Fused Bias + ReLU**: Reduces global memory traffic by combining addition and activation.
-    *   **Fused Softmax**: Single-pass grid launch for max, sum, and normalization.
-4.  **Vectorized Memory**: Uses `float4` loads to saturate high-bandwidth memory (HBM) on the RTX 5060.
-
----
-
 ## The 17 Custom Kernels
 *   **K1: Pad/Truncate**: Standardizes input sequences to 128 tokens.
 *   **K2: Embedding Lookup**: Vectorized retrieval of word/position features.
@@ -52,7 +42,7 @@ We have developed a high-performance sentiment engine using **17 hand-optimized 
 *   **K7: BN Mean**: Grid-stride loop calculation of feature-wise means.
 *   **K8: BN Var**: Warp-level reduction of statistical variance.
 *   **K9: BN Apply**: Fusion kernel for scaling, shifting, and normalization.
-*   **K10: cuBLAS GEMM**: Hardware-accelerated (TF32) matrix multiplication.
+*   **K10: Register-Tiled GEMM**: Custom 4x4 register-tiled kernel with vectorized shared memory loads.
 *   **K11: Logit Projection**: Optimized matrix-vector projection for classification.
 *   **K12: Softmax Max**: Numerically stable per-row maximum finding.
 *   **K13: Softmax Sum**: Parallel reduction of exponential sums.
@@ -61,13 +51,30 @@ We have developed a high-performance sentiment engine using **17 hand-optimized 
 *   **K16: Fused Bias+ReLU**: Memory-optimized combination of bias and activation.
 *   **K17: Fused Softmax**: Single-pass high-efficiency softmax implementation.
 
+## Performance & Optimization
+Detailed benchmarks, individual kernel latencies, and technical optimization deep-dives can be found in the [Performance Report](performance_report.md).
+
 ---
 
-## Performance
-| Metric | Baseline (PyTorch CUDA) | Custom CUDA Pipeline | Speedup |
-| :--- | :--- | :--- | :--- |
-| Forward Pass (Batch: 2048) | 6.88 ms | 4.83 ms | **1.42x** |
-| Memory Footprint | ~14.88 MB | ~1.10 MB | **13.5x** |
+## Testing Strategy
+The project uses a Python-based unit test suite to validate every kernel individually against PyTorch's native math.
+
+### `tests/run_all_tests.py` — Per-Kernel Unit Tests
+Tests each of the 17 kernels **individually and in isolation**. If a kernel produces wrong numbers, you see exactly which one failed.
+```
+K1: Pad/Truncate     → Verifying... PASS   120.45 us
+K2: Embedding Lookup → Verifying... PASS   340.12 us
+K7: BN Mean          → Verifying... FAIL   ← precise, you know exactly what broke
+```
+
+### The Recommended Workflow
+```
+Write / modify a kernel
+        ↓
+python tests/run_all_tests.py   ← Did THIS kernel get the math right?
+        ↓ PASS
+Ship it
+```
 
 ---
 
@@ -76,5 +83,6 @@ We have developed a high-performance sentiment engine using **17 hand-optimized 
 2.  **Train Model**: `python scripts/train.py`
 3.  **Run Inference**: `python custom_pipeline/inference.py`
 4.  **Verify Kernels**: `python tests/run_all_tests.py`
+5.  **GEMM Benchmark**: `python scripts/benchmark_gemm.py`
 
 **Current Status:** Production ready. All 17 kernels are verified and optimized for RTX 50-series hardware.

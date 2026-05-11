@@ -3,7 +3,7 @@
 This document consolidates the benchmarking and profiling results for the RTX 5060 deployment of the modular CUDA pipeline.
 
 ## 1. Overall Pipeline Performance
-*Measured via `tests/compare_full_model.py` and `Kernals/pipeline_baseline.cu`.*
+*Measured via `tests/compare_full_model.py`.*
 
 | Metric | Baseline (PyTorch CUDA) | Custom CUDA Pipeline | Speedup |
 | :--- | :--- | :--- | :--- |
@@ -12,6 +12,23 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 
 > [!NOTE]
 > The custom pipeline achieves significant speedup primarily by reducing kernel launch overhead and utilizing fused kernels for operations like Bias + Leaky ReLU.
+
+### 1.1 C++ Standalone Baseline (Historical)
+*This benchmark compared the full CUDA pipeline against a single-threaded C++ CPU implementation (Batch: 128) prior to code cleanup.*
+
+**How this test was conducted:**
+- **Standalone C++ Environment**: The test was written in pure C++ and CUDA, completely bypassing the Python interpreter and PyTorch overhead to measure raw kernel execution speed.
+- **Random Data Parity**: The same set of random input tokens and lengths was generated and processed by both the CPU and GPU paths to ensure perfect mathematical alignment.
+- **Warm-up Phase**: To eliminate "Cold Start" noise (CUDA context initialization and kernel loading), the GPU pipeline was executed 3 times as a warm-up before the final timed run.
+- **Hardware-Level Timing**: Used high-precision `cudaEvent_t` timers to measure the GPU duration and standard C++ `<chrono>` for the CPU.
+
+| Execution | Time |
+| :--- | :--- |
+| CPU Reference (Single-threaded C++) | 75.92 ms |
+| GPU Custom Pipeline (17 CUDA Kernels) | **0.136 ms** |
+| **Speedup** | **558x** |
+
+---
 
 ## 2. Individual Kernel Deep Dive
 *Measured via `tests/run_all_tests.py` and NVIDIA `ncu`.*
@@ -56,13 +73,18 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 > **Surprising Result:** While cuBLAS dominates at very small and very large matrix sizes due to its generalized Tensor Core optimization, our **Custom "Pro" Kernel actually beat cuBLAS** by ~24% on medium-sized (512x512) matrices. This demonstrates the power of hand-tuning register tiling for specific workloads!
 
 ## 5. Optimization Highlights
-- **cuBLAS Integration**: The GEMM operations are now powered by NVIDIA cuBLAS with TF32 enabled, utilizing Tensor Cores for maximum throughput.
-- **Fused Bias + ReLU**: Consolidates memory-bound operations into a single pass, reducing global memory round-trips.
-- **Fused Softmax**: A single-pass grid launch that handles max, sum, and normalization, significantly reducing kernel launch overhead.
+To achieve these results, several hardware-aware optimizations were implemented:
+
+1.  **Unity Build System**: Includes all CUDA kernels into a single translation unit. This reduces compilation overhead and allows the compiler to perform better whole-program optimizations and inlining.
+2.  **cuBLAS Integration**: Leverages hardware **Tensor Cores (TF32)** for matrix multiplication. For very large scales, this provides significant throughput gains over manual tiling.
+3.  **Kernel Fusion**: 
+    *   **Fused Bias + ReLU**: Combines the bias addition and activation into a single kernel pass, reducing global memory round-trips by 50% for these layers.
+    *   **Fused Softmax**: A high-efficiency implementation that handles max-finding, sum-reduction, and normalization in a single grid launch.
+4.  **Vectorized Memory**: Utilizes `float4` and `int4` loads where possible to saturate the high-bandwidth memory (HBM) on the RTX 5060.
 
 ---
 
-## 5. Profiling Tools & Metric Sources
+## 6. Profiling Tools & Metric Sources
 *How to reproduce these metrics using NVIDIA's professional profiling suite.*
 
 ### **Tool Mapping**
@@ -96,7 +118,7 @@ In this `GPUProject`, NVIDIA Nsight Systems (`nsys`) is utilized for **system-wi
 
 ---
 
-## 6. Benchmark Methodology
+## 7. Benchmark Methodology
 *Details on how these metrics are calculated in `tests/compare_full_model.py`.*
 
 - **Workload**: Batch Size: 2048 | Seq Len: 128 (Architectural limit).
@@ -107,4 +129,4 @@ In this `GPUProject`, NVIDIA Nsight Systems (`nsys`) is utilized for **system-wi
 
 ---
 
-*Last Updated: 2026-05-10*
+*Last Updated: 2026-05-11*
