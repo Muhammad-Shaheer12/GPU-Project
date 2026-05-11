@@ -1,6 +1,6 @@
 #include <torch/extension.h>
 #include <vector>
-#include "bridge.h"
+#include "bridge.hpp"
 
 // ============================================================
 // Helper: ensure tensor is on CUDA, contiguous, and correct type
