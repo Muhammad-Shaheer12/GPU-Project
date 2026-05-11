@@ -39,31 +39,39 @@ __global__ void gemm_tiled_kernel(const float* __restrict__ A,
 
     // 2. Iterate over the K dimension in blocks of BK
     for (int k_offset = 0; k_offset < K; k_offset += BK) {
-        
-        // Cooperative Load from A -> As
-        // We have 256 threads loading 64x8 = 512 elements (2 elements per thread)
         int tid = ty * 16 + tx;
-        int a_inner_row = tid / BK;
-        int a_inner_col = tid % BK;
-        int a_global_row = by * BM + a_inner_row;
-        int a_global_col = k_offset + a_inner_col;
         
-        if (a_global_row < M && a_global_col < K)
-            As[a_inner_row][a_inner_col] = A[a_global_row * K + a_global_col];
-        else
-            As[a_inner_row][a_inner_col] = 0.0f;
+        // 2. Cooperative Load from A -> As (64x8 tile)
+        // 256 threads load 512 elements (2 elements per thread)
+        #pragma unroll
+        for (int i = 0; i < 2; ++i) {
+            int tid_ext = tid + i * 256;
+            int a_inner_row = tid_ext / BK;
+            int a_inner_col = tid_ext % BK;
+            int a_global_row = by * BM + a_inner_row;
+            int a_global_col = k_offset + a_inner_col;
+            
+            if (a_global_row < M && a_global_col < K)
+                As[a_inner_row][a_inner_col] = A[a_global_row * K + a_global_col];
+            else
+                As[a_inner_row][a_inner_col] = 0.0f;
+        }
 
-        // Cooperative Load from B -> Bs
-        // We have 256 threads loading 8x64 = 512 elements (2 elements per thread)
-        int b_inner_row = tid / BN;
-        int b_inner_col = tid % BN;
-        int b_global_row = k_offset + b_inner_row;
-        int b_global_col = bx * BN + b_inner_col;
+        // 3. Cooperative Load from B -> Bs (8x64 tile)
+        // 256 threads load 512 elements (2 elements per thread)
+        #pragma unroll
+        for (int i = 0; i < 2; ++i) {
+            int tid_ext = tid + i * 256;
+            int b_inner_row = tid_ext / BN;
+            int b_inner_col = tid_ext % BN;
+            int b_global_row = k_offset + b_inner_row;
+            int b_global_col = bx * BN + b_inner_col;
 
-        if (b_global_row < K && b_global_col < N)
-            Bs[b_inner_row][b_inner_col] = B[b_global_row * N + b_global_col];
-        else
-            Bs[b_inner_row][b_inner_col] = 0.0f;
+            if (b_global_row < K && b_global_col < N)
+                Bs[b_inner_row][b_inner_col] = B[b_global_row * N + b_global_col];
+            else
+                Bs[b_inner_row][b_inner_col] = 0.0f;
+        }
 
         __syncthreads();
 

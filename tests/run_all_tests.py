@@ -1,4 +1,31 @@
 import torch
+import os
+import sys
+
+# Setup paths for Windows DLL loading and local extension
+ext_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'custom_ext'))
+sys.path.append(ext_path)
+
+if sys.platform == 'win32':
+    # Add torch lib for DLLs like torch_python.dll and cublas
+    torch_lib_path = os.path.join(os.path.dirname(torch.__file__), 'lib')
+    if os.path.exists(torch_lib_path):
+        os.add_dll_directory(torch_lib_path)
+    
+    # Add CUDA bin for cublas and other runtimes
+    cuda_path = os.environ.get('CUDA_PATH') or os.environ.get('CUDA_HOME')
+    if cuda_path:
+        # On Windows, DLLs are often in bin/x64 for CUDA 12+
+        cuda_bin = os.path.join(cuda_path, 'bin', 'x64')
+        if not os.path.exists(cuda_bin):
+            cuda_bin = os.path.join(cuda_path, 'bin')
+        
+        if os.path.exists(cuda_bin):
+            os.add_dll_directory(cuda_bin)
+
+    # Add extension path for the .pyd itself
+    os.add_dll_directory(ext_path)
+
 import custom_cuda_ops
 import torch.utils.benchmark as benchmark
 import math

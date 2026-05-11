@@ -48,9 +48,14 @@ void launch_pad_truncate(const int* input, const int* lengths, int* output, int 
 }
 
 void launch_embedding_lookup(const int* tokens, const float* embedding, float* output, int total_tokens, int dim, int vocab, int unk_id) {
-    const int threads = 256;
-    int blocks = (total_tokens * dim + threads - 1) / threads;
-    embedding_lookup_kernel<<<blocks, threads>>>(tokens, embedding, output, total_tokens, dim, vocab, unk_id);
+    // Each thread (lane) handles 4 dimensions (float4)
+    dim3 block(16, 16); 
+    dim3 grid(1, (total_tokens + 15) / 16);
+    // Since block.x is 16, it covers 16*4 = 64 dims. 
+    // If dim > 64, we need more blocks in X.
+    grid.x = (dim + 63) / 64; 
+    
+    embedding_lookup_kernel<<<grid, block>>>(tokens, embedding, output, total_tokens, dim, vocab, unk_id);
 }
 
 void launch_positional_encoding(const float* input, float* output, int total_tokens, int dim) {
@@ -60,9 +65,16 @@ void launch_positional_encoding(const float* input, float* output, int total_tok
 }
 
 void launch_weighted_mean_pooling(const float* input, const float* weights, float* output, int batch, int seq_len, int dim) {
-    const int threads = 256;
-    int blocks = (batch * dim + threads - 1) / threads;
-    weighted_mean_pooling_kernel<<<blocks, threads>>>(input, weights, output, batch, seq_len, dim);
+    // Grid: one block per (sentence, dim)
+    dim3 grid(batch, dim);
+    // Threads: one per sequence element
+    int threads = seq_len; 
+    if (threads > 1024) threads = 1024; // Limit to max block size
+    
+    // Shared memory: 2 * seq_len floats (for val and weight)
+    size_t shared_mem = 2 * seq_len * sizeof(float);
+    
+    weighted_mean_pooling_kernel<<<grid, threads, shared_mem>>>(input, weights, output, batch, seq_len, dim);
 }
 
 void launch_bias_add(const float* input, const float* bias, float* output, int rows, int cols) {

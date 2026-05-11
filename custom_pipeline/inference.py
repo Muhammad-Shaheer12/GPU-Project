@@ -1,6 +1,20 @@
 import torch
-import numpy as np
 import os
+import sys
+
+# Setup paths for Windows DLL loading and local extension
+ext_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'custom_ext'))
+sys.path.append(ext_path)
+
+if sys.platform == 'win32':
+    # Add torch lib for DLLs like torch_python.dll and cublas
+    torch_lib_path = os.path.join(os.path.dirname(torch.__file__), 'lib')
+    if os.path.exists(torch_lib_path):
+        os.add_dll_directory(torch_lib_path)
+    # Add extension path for the .pyd itself
+    os.add_dll_directory(ext_path)
+
+import numpy as np
 from pyModel import ControlledModel
 
 def run_inference():
