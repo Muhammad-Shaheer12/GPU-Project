@@ -35,6 +35,7 @@ setup(
                 os.path.join(kernals_dir, 'kernel17_fused_softmax.cu'),
             ],
             include_dirs=[kernals_dir],
+            libraries=['cublas'],
             extra_compile_args={'cxx': ['-O3'],
                                 'nvcc': ['-O3', '-DPIPELINE_BUILD']}
         )

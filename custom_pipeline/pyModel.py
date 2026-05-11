@@ -30,9 +30,11 @@ class ControlledModel(nn.Module):
         self.pool_weight = nn.Parameter(torch.ones(max_len, 1) / max_len)
         
         # Feature Extraction: Neural Layers
-        self.fc1 = nn.Linear(embed_dim, hidden_dim) # GEMM Kernel
-        self.bn1 = nn.BatchNorm1d(hidden_dim)       # Batch Norm Kernel
-        self.act = nn.LeakyReLU(0.01)               # Leaky ReLU Kernel
+        self.pool_bias = nn.Parameter(torch.zeros(embed_dim)) # For fused_bias_leaky_relu
+        self.bn1 = nn.BatchNorm1d(embed_dim)                 # Batch Norm Kernel
+        self.act = nn.LeakyReLU(0.01)                         # Leaky ReLU Kernel
+        
+        self.fc1 = nn.Linear(embed_dim, hidden_dim, bias=False) # GEMM Kernel (bias-less to match baseline)
         
         # Classification
         self.fc2 = nn.Linear(hidden_dim, 5)         # GEMV Kernel (5 classes for 1-5 stars)
@@ -40,7 +42,7 @@ class ControlledModel(nn.Module):
         
     def forward(self, x, lengths=None, extract_intermediates=False):
         intermediates = {}
-        use_custom = custom_cuda_ops is not None
+        use_custom = custom_cuda_ops is not None and not self.training
         
         # K1: CUSTOM CUDA KERNEL - pad_truncate
         if lengths is not None and use_custom:
@@ -91,46 +93,45 @@ class ControlledModel(nn.Module):
             )
             if extract_intermediates: intermediates['02_pooled_out'] = pooled.detach().cpu().numpy()
             
-            # K10 + K5: CUSTOM CUDA KERNELS - gemm_tiled + bias_add (fc1)
-            # nn.Linear computes: output = input @ weight.T + bias
-            # Our GEMM kernel does C = A * B, so we need weight transposed
-            fc1_weight_t = self.fc1.weight.data.t().contiguous()  # [embed_dim, hidden_dim]
-            hidden = custom_cuda_ops.gemm_tiled(pooled.contiguous(), fc1_weight_t)
-            hidden = custom_cuda_ops.bias_add(hidden, self.fc1.bias.data)
-            if extract_intermediates: intermediates['03_fc1_out'] = hidden.detach().cpu().numpy()
+            # K16: CUSTOM CUDA KERNEL - fused_bias_leaky_relu
+            # Applied after pooling to match baseline architecture
+            activated = custom_cuda_ops.fused_bias_leaky_relu(
+                pooled.contiguous(), 
+                self.pool_bias.data, 
+                0.01
+            )
+            if extract_intermediates: intermediates['03_act_out'] = activated.detach().cpu().numpy()
             
             # K7 + K8 + K9: CUSTOM CUDA KERNELS - batchnorm pipeline
-            bn_mean = custom_cuda_ops.batchnorm_mean(hidden.contiguous())
-            bn_var = custom_cuda_ops.batchnorm_var(hidden.contiguous(), bn_mean)
-            hidden_bn = custom_cuda_ops.batchnorm_apply(
-                hidden.contiguous(),
+            bn_mean = custom_cuda_ops.batchnorm_mean(activated.contiguous())
+            bn_var = custom_cuda_ops.batchnorm_var(activated.contiguous(), bn_mean)
+            bn_out = custom_cuda_ops.batchnorm_apply(
+                activated.contiguous(),
                 bn_mean,
                 bn_var,
                 self.bn1.weight.data,   # gamma
                 self.bn1.bias.data,     # beta
                 1e-5                     # eps
             )
-            if extract_intermediates: intermediates['04_bn_out'] = hidden_bn.detach().cpu().numpy()
+            if extract_intermediates: intermediates['04_bn_out'] = bn_out.detach().cpu().numpy()
             
-            # K6: CUSTOM CUDA KERNEL - leaky_relu
-            act_out = custom_cuda_ops.leaky_relu(hidden_bn.contiguous(), 0.01)
-            if extract_intermediates: intermediates['05_act_out'] = act_out.detach().cpu().numpy()
+            # K10: CUSTOM CUDA KERNEL - gemm_tiled (now using cuBLAS internally)
+            fc1_weight_t = self.fc1.weight.data.t().contiguous()
+            hidden = custom_cuda_ops.gemm_tiled(bn_out.contiguous(), fc1_weight_t)
+            if extract_intermediates: intermediates['05_fc1_out'] = hidden.detach().cpu().numpy()
             
             # K11: CUSTOM CUDA KERNEL - logit_projection (fc2)
-            # logit_projection expects weights as [hidden x classes]
-            fc2_weight_t = self.fc2.weight.data.t().contiguous()  # [hidden_dim, 5]
+            fc2_weight_t = self.fc2.weight.data.t().contiguous()
             logits = custom_cuda_ops.logit_projection(
-                act_out.contiguous(),
+                hidden.contiguous(),
                 fc2_weight_t
             )
             # Add fc2 bias manually
             logits = custom_cuda_ops.bias_add(logits, self.fc2.bias.data)
             if extract_intermediates: intermediates['06_logits'] = logits.detach().cpu().numpy()
             
-            # K12 + K13 + K14: CUSTOM CUDA KERNELS - softmax pipeline
-            row_max = custom_cuda_ops.softmax_row_max(logits.contiguous())
-            row_sum = custom_cuda_ops.softmax_row_sum(logits.contiguous(), row_max)
-            probs = custom_cuda_ops.softmax_normalize(logits.contiguous(), row_max, row_sum)
+            # K17: CUSTOM CUDA KERNEL - fused_softmax
+            probs = custom_cuda_ops.fused_softmax(logits.contiguous())
             if extract_intermediates: intermediates['07_probs'] = probs.detach().cpu().numpy()
             
         else:
@@ -146,16 +147,17 @@ class ControlledModel(nn.Module):
             pooled = torch.sum(x_emb * self.pool_weight, dim=1)
             if extract_intermediates: intermediates['02_pooled_out'] = pooled.detach().cpu().numpy()
             
-            hidden = self.fc1(pooled)
-            if extract_intermediates: intermediates['03_fc1_out'] = hidden.detach().cpu().numpy()
+            # Match baseline architecture: Pool -> Bias -> ReLU -> BN -> GEMM
+            activated = self.act(pooled + self.pool_bias)
+            if extract_intermediates: intermediates['03_act_out'] = activated.detach().cpu().numpy()
             
-            hidden_bn = self.bn1(hidden)
-            if extract_intermediates: intermediates['04_bn_out'] = hidden_bn.detach().cpu().numpy()
+            bn_out = self.bn1(activated)
+            if extract_intermediates: intermediates['04_bn_out'] = bn_out.detach().cpu().numpy()
             
-            act_out = self.act(hidden_bn)
-            if extract_intermediates: intermediates['05_act_out'] = act_out.detach().cpu().numpy()
+            hidden = self.fc1(bn_out)
+            if extract_intermediates: intermediates['05_fc1_out'] = hidden.detach().cpu().numpy()
             
-            logits = self.fc2(act_out)
+            logits = self.fc2(hidden)
             if extract_intermediates: intermediates['06_logits'] = logits.detach().cpu().numpy()
             
             probs = self.softmax(logits)

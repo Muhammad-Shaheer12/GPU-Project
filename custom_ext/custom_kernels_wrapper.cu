@@ -1,4 +1,6 @@
 #include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <iostream>
 
 // ============================================================
 // Forward declarations of all __global__ kernel functions
@@ -242,15 +244,54 @@ void launch_batchnorm_apply(const float* input,
         input, mean, var, gamma, beta, output, batch, features, eps);
 }
 
+// Static handle to avoid creation overhead
+static cublasHandle_t global_handle = nullptr;
+
+static void ensure_cublas_handle() {
+    if (global_handle == nullptr) {
+        if (cublasCreate(&global_handle) != CUBLAS_STATUS_SUCCESS) {
+            std::cerr << "Failed to create cuBLAS handle\n";
+            std::exit(1);
+        }
+        // Enable TF32 for Tensor Cores on Ampere+ (RTX 5060)
+        cublasSetMathMode(global_handle, CUBLAS_TF32_TENSOR_OP_MATH);
+    }
+}
+
 void launch_gemm_tiled(const float* A,
                         const float* B,
                         float* C,
                         int M,
                         int K,
                         int N) {
-    dim3 block(TILE, TILE, 1);
-    dim3 grid((N + TILE - 1) / TILE, (M + TILE - 1) / TILE, 1);
-    gemm_tiled_kernel<<<grid, block>>>(A, B, C, M, K, N);
+    ensure_cublas_handle();
+
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+
+    // cuBLAS is column-major. PyTorch is row-major.
+    // To compute C = A * B (row-major):
+    // C^T = B^T * A^T (column-major)
+    
+    cublasStatus_t status = cublasGemmEx(
+        global_handle,
+        CUBLAS_OP_N, 
+        CUBLAS_OP_N, 
+        N,           // rows of C^T
+        M,           // cols of C^T
+        K,           // inner dim
+        &alpha,
+        B, CUDA_R_32F, N,
+        A, CUDA_R_32F, K,
+        &beta,
+        C, CUDA_R_32F, N,
+        CUBLAS_COMPUTE_32F_FAST_TF32,
+        CUBLAS_GEMM_DEFAULT
+    );
+
+    if (status != CUBLAS_STATUS_SUCCESS) {
+        std::cerr << "cuBLAS GEMM failed with status: " << status << "\n";
+    }
 }
 
 void launch_logit_projection(const float* input,

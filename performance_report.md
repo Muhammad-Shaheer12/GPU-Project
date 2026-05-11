@@ -7,14 +7,14 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 
 | Metric | Baseline (PyTorch CUDA) | Custom CUDA Pipeline | Speedup |
 | :--- | :--- | :--- | :--- |
-| Forward Pass (Batch: 2048) | 6.93 ms | 4.32 ms | **1.60x** |
+| Forward Pass (Batch: 2048) | 6.88 ms | 4.83 ms | **1.42x** |
 | Memory Footprint | ~14.88 MB | ~1.10 MB | **13.5x** |
 
 > [!NOTE]
 > The custom pipeline achieves significant speedup primarily by reducing kernel launch overhead and utilizing fused kernels for operations like Bias + Leaky ReLU.
 
 ## 2. Individual Kernel Deep Dive
-*Measured via `tests/profile_all_kernels.py` and NVIDIA `ncu`.*
+*Measured via `tests/run_all_tests.py` and NVIDIA `ncu`.*
 
 | Kernel | Torch Benchmark | Hardware Latency (`ncu`) | Bandwidth Utilization | Occupancy |
 | :--- | :--- | :--- | :--- | :--- |
@@ -41,9 +41,9 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 | **Full Softmax** | 30.80 µs | 10.60 µs | **2.91x** |
 
 ## 4. Optimization Highlights
-- **Fused Bias + ReLU**: Consolidates two kernel launches into one, reducing global memory round-trips.
-- **Warp-level Reductions**: Uses `__shfl_down_sync` instead of shared memory for row-wise reductions (Max, Sum, Argmax), improving throughput for small classes.
-- **Vectorized Loads**: Employs `float4` to saturate memory bandwidth in memory-bound kernels.
+- **cuBLAS Integration**: The GEMM operations are now powered by NVIDIA cuBLAS with TF32 enabled, utilizing Tensor Cores for maximum throughput.
+- **Fused Bias + ReLU**: Consolidates memory-bound operations into a single pass, reducing global memory round-trips.
+- **Fused Softmax**: A single-pass grid launch that handles max, sum, and normalization, significantly reducing kernel launch overhead.
 
 ---
 
@@ -63,7 +63,7 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 #### **1. Deep-Dive Kernel Analysis (ncu)**
 To get the hardware-level metrics for every kernel:
 ```powershell
-ncu --set full --target-processes all -o ncu_report python tests/profile_all_kernels.py
+ncu --set full --target-processes all -o ncu_report python tests/run_all_tests.py
 ```
 *Note: This will generate a detailed report you can open in the **Nsight Compute UI**.*
 

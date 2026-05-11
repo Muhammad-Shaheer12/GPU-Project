@@ -2,7 +2,7 @@
 ---
 
 ## Project Goal
-We have developed a high-performance sentiment engine using **15 custom CUDA kernels** to predict 1–5 star ratings from 7M Yelp reviews. By migrating the entire PyTorch inference pipeline to native CUDA C++, we achieve massive speedups over standard CPU/GPU implementations.
+We have developed a high-performance sentiment engine using **17 custom CUDA kernels** to predict 1–5 star ratings from 7M Yelp reviews. By migrating the entire PyTorch inference pipeline to native CUDA C++, we achieve massive speedups over standard CPU/GPU implementations.
 
 The project follows a strict **Host/Device** architecture:
 *   **The Host (Python):** Manages data loading, tokenization, and coordinates the inference pipeline via a custom PyTorch C++ extension.
@@ -36,7 +36,7 @@ The project follows a strict **Host/Device** architecture:
 7.  **BatchNorm Mean**: Calculates feature means via grid-stride loops and warp-level reductions.
 8.  **BatchNorm Variance**: Computes statistical variance using register-to-register communication.
 9.  **BatchNorm Apply**: Normalizes, scales, and shifts data in a single fusion kernel.
-10. **Tiled GEMM**: High-performance matrix multiplication ($C = A \times B$) using shared memory tiling.
+10. **Accelerated GEMM**: High-performance matrix multiplication ($C = A \times B$) powered by **NVIDIA cuBLAS** with **TF32** support for Tensor Cores.
 11. **Logit Projection**: Optimized matrix-vector projection for the final classification layer.
 
 ### Classification Pipeline
@@ -104,4 +104,4 @@ python tests/run_all_tests.py
 
 ---
 
-**Current Status:** All 15 kernels are fully integrated and verified. The system is capable of performing high-speed sentiment inference on millions of reviews using native GPU acceleration.
+**Current Status:** All 17 kernels are fully integrated and verified. The system utilizes industry-standard cuBLAS acceleration and custom kernel fusion for maximum performance.
