@@ -12,3 +12,7 @@ custom_ext/dist/
 custom_pipeline/execution_time.log
 custom_pipeline/ncu_output.log
 tests/ncu_output.log
+
+# Ignore binary data files everywhere
+*.npz
+*.pth
