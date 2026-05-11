@@ -67,11 +67,13 @@ def benchmark_gemm(M, K, N, iterations=100):
     print(f"cuBLAS is {speedup:.2f}x faster than Custom Pro Kernel.")
 
 if __name__ == "__main__":
-    # Test cases: Small, Medium, Large
+    # Test cases: Small, Medium, Large, and Production Model Layers
     test_cases = [
         (128, 128, 128),
         (512, 512, 512),
-        (2048, 2048, 2048)
+        (2048, 2048, 2048),
+        (2048, 64, 128),   # Production Layer 1 (FC1)
+        (2048, 128, 5)     # Production Layer 2 (FC2)
     ]
     
     for M, K, N in test_cases:

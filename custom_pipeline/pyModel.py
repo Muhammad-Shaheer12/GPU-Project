@@ -54,7 +54,7 @@ class ControlledModel(nn.Module):
             var = custom_cuda_ops.batchnorm_var(activated.contiguous(), mean)
             bn_out = custom_cuda_ops.batchnorm_apply(activated.contiguous(), mean, var, self.bn1.weight.data, self.bn1.bias.data, 1e-5)
             
-            # K10: cuBLAS GEMM
+            # K10: Tiled GEMM
             hidden = custom_cuda_ops.gemm_tiled(bn_out.contiguous(), self.fc1.weight.data.t().contiguous())
             
             # K11: Projection + Bias

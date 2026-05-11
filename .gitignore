@@ -6,6 +6,7 @@ __pycache__
 scripts/yelp_tokenized.npz
 scripts/cuda_debug_tensors.npz
 custom_ext/build.log
+custom_ext/build_log.txt
 custom_ext/build/
 custom_ext/custom_cuda_ops.egg-info/
 custom_ext/dist/
@@ -16,3 +17,6 @@ tests/ncu_output.log
 # Ignore binary data files everywhere
 *.npz
 *.pth
+*.ncu-rep
+*.sqlite
+*.nsys-rep
