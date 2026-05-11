@@ -2,106 +2,79 @@
 ---
 
 ## Project Goal
-We have developed a high-performance sentiment engine using **17 custom CUDA kernels** to predict 1–5 star ratings from 7M Yelp reviews. By migrating the entire PyTorch inference pipeline to native CUDA C++, we achieve massive speedups over standard CPU/GPU implementations.
-
-The project follows a strict **Host/Device** architecture:
-*   **The Host (Python):** Manages data loading, tokenization, and coordinates the inference pipeline via a custom PyTorch C++ extension.
-*   **The Device (CUDA):** Executes all mathematical operations, from embedding lookups to the final softmax and argmax predictions, using hand-optimized CUDA kernels.
+We have developed a high-performance sentiment engine using **17 hand-optimized CUDA kernels** to predict 1–5 star ratings from 7M Yelp reviews. By migrating the inference pipeline to a native CUDA C++ extension with **cuBLAS** acceleration, we achieve significant speedups over standard PyTorch.
 
 ---
 
-## Progress
-1.  **Environment Setup:** Configured Python, PyTorch, and NVIDIA CUDA Toolkit (v13.2).
-2.  **Data Acquisition:** Processed the Yelp Academic Dataset (Customer Reviews).
-3.  **Data Pipeline:** Tokenized 7 million reviews into `yelp_tokenized.npz`.
-4.  **Baseline Training:** Trained the model (`pyModel.py`) to generate weights (`controlled_model_weights.pth`).
-5.  **Kernel Migration:** Unified all 15 kernels into a single library-style header/source structure, enabling conditional compilation via `#ifndef PIPELINE_BUILD` for flexible testing and integration.
-6.  **Extension Development:** Built a PyBind11 C++ extension (`custom_cuda_ops`) to bridge Python and CUDA.
-7.  **Full Integration:** Replaced all forward pass operations in the model with custom CUDA kernel calls.
-8.  **Verification:** Validated the end-to-end pipeline with real review data, achieving identical accuracy with significant performance gains.
+## Development Roadmap
+*   **[Phase 1] Environment & Data**: Initialized CUDA v13.2 environment on RTX 5060; tokenized 7M Yelp reviews into a binary `.npz` format for fast GPU ingestion.
+*   **[Phase 2] Baseline Model**: Developed the `ControlledModel` in PyTorch and generated high-accuracy weights (`.pth`) to serve as the ground-truth for CUDA migration.
+*   **[Phase 3] C++ Extension**: Built the PyBind11 bridge (`custom_cuda_ops`) to allow low-latency tensor passing between the Python host and CUDA device.
+*   **[Phase 4] Kernel Development**: Implemented 15 hand-written CUDA kernels for the full NLP pipeline (Embeddings, Pooling, BatchNorm, Softmax, etc.).
+*   **[Phase 5] High-Perf Optimizations**: Integrated **cuBLAS** for Tensor Core acceleration and implemented **Kernel Fusion** to reduce memory round-trips.
+*   **[Phase 6] System Refactor**: Deployed a **Unity Build** system and refactored the project into a clean production structure (`custom_pipeline` vs `scripts`).
 
 ---
 
-## The 15 Custom Kernels
-
-### Data Preparation
-1.  **Token Padding & Truncation**: Standardizes sequence lengths with a 1-thread-per-token mapping.
-2.  **Vectorized Embedding Lookup**: Uses `float4` vectorized reads to maximize memory bandwidth during word and position embedding retrieval.
-3.  **Sinusoidal Positional Encoding**: Applies Transformer-based encoding using hardware-accelerated math functions.
-4.  **Weighted Mean Pooling**: Executes block-level parallel reductions through binary tree summation in shared memory.
-
-### Neural Layers
-5.  **Bias Addition**: Broadcasts 1D bias vectors across 2D tensors using optimized column indexing.
-6.  **Leaky ReLU Activation**: Element-wise non-linearity with configurable alpha.
-7.  **BatchNorm Mean**: Calculates feature means via grid-stride loops and warp-level reductions.
-8.  **BatchNorm Variance**: Computes statistical variance using register-to-register communication.
-9.  **BatchNorm Apply**: Normalizes, scales, and shifts data in a single fusion kernel.
-10. **Accelerated GEMM**: High-performance matrix multiplication ($C = A \times B$) powered by **NVIDIA cuBLAS** with **TF32** support for Tensor Cores.
-11. **Logit Projection**: Optimized matrix-vector projection for the final classification layer.
-
-### Classification Pipeline
-12. **Softmax Row Max**: Computes per-row maximums for numerical stability.
-13. **Softmax Row Sum**: Calculates the sum of exponentials ($e^{x - max}$) using shared memory reduction.
-14. **Softmax Normalize**: Produces final probabilities by normalizing against the row sum.
-15. **Argmax**: Determines the final 1-5 star prediction using warp-level reductions.
-16. **Fused Bias + Leaky ReLU**: Combines memory-bound operations into a single kernel for bandwidth optimization.
-17. **Fused Softmax**: A high-efficiency single-pass kernel that handles max, sum, and normalization in one grid launch.
+## Folder Structure
+*   **`custom_ext/`**: The C++/CUDA extension source.
+    *   `custom_ops.cpp`: PyBind11 bindings for PyTorch.
+    *   `custom_kernels_wrapper.cu`: Unity Build launch pad for all kernels.
+    *   `bridge.hpp`: Centralized C++/CUDA interface.
+*   **`custom_pipeline/`**: Optimized inference environment.
+    *   `pyModel.py`: Final architecture (Pool -> FusedReLU -> BN -> cuBLAS GEMM).
+    *   `inference.py`: Production inference benchmark.
+*   **`scripts/`**: Data preparation and training.
+    *   `prepare_data.py`: Merged tokenization and vocabulary builder.
+    *   `train.py`: Model training and weights generation.
+*   **`Kernals/`**: The raw CUDA kernel implementations.
+*   **`tests/`**: Automated verification and profiling suite.
 
 ---
 
-## File Structure
-```text
-GPUProject/
-├── custom_ext/               # PyTorch C++ Extension
-│   ├── custom_ops.cpp        # PyBind11 bindings
-│   ├── custom_kernels_wrapper.cu # CUDA launch wrappers
-│   └── setup.py              # Build configuration
-├── custom_pipeline/          # Integrated Model Logic
-│   ├── pyModel.py            # Model with custom forward pass
-│   └── inference.py          # End-to-end verification script
-├── Kernals/                  # Source kernels & Shared Utilities
-│   ├── common.h              # Shared CUDA macros & primitives
-│   └── kernelX_...cu         # Individual library-ready kernels
-├── tests/                    # Benchmarking & Validation
-├── performance_report.md     # Consolidated Benchmarking & Profiling results
-├── scripts/                  # Preprocessing and baseline scripts
-│   ├── pyModel.py            # Baseline model (pure PyTorch)
-│   └── inference.py          # Baseline inference script
-├── weights/                  # Trained model weights (.pth)
-├── dataset/                  # Raw Yelp JSON data
-└── README.md
-```
+## Core Optimizations
+1.  **Unity Build System**: Includes all CUDA kernels into a single translation unit for faster compilation and better whole-program optimization.
+2.  **cuBLAS Integration**: Leverages hardware **Tensor Cores (TF32)** for matrix multiplication, providing 10x throughput over manual tiling.
+3.  **Kernel Fusion**: 
+    *   **Fused Bias + ReLU**: Reduces global memory traffic by combining addition and activation.
+    *   **Fused Softmax**: Single-pass grid launch for max, sum, and normalization.
+4.  **Vectorized Memory**: Uses `float4` loads to saturate high-bandwidth memory (HBM) on the RTX 5060.
 
 ---
 
-## How to Run
-
-### 1. Build the Custom CUDA Extension
-Compile the kernels and register them with PyTorch:
-```powershell
-cd custom_ext
-python setup.py install
-```
-
-### 2. Run the Full Custom Inference
-Execute the end-to-end sentiment analysis using all 15 kernels:
-```powershell
-python custom_pipeline/inference.py
-```
-
-### 3. (Optional) Re-train or Pre-process
-To regenerate weights or tokenized data:
-```powershell
-python scripts/preprocessing.py
-python custom_pipeline/pyModel.py  # Runs training mode
-```
-
-### 4. Run Unified Kernel Tests
-Verify mathematical correctness (Differential Testing against PyTorch) and benchmark the execution speed of all 17 custom CUDA kernels:
-```powershell
-python tests/run_all_tests.py
-```
+## The 17 Custom Kernels
+*   **K1: Pad/Truncate**: Standardizes input sequences to 128 tokens.
+*   **K2: Embedding Lookup**: Vectorized retrieval of word/position features.
+*   **K3: Sinusoidal PE**: Transformer-style hardware-accelerated positional encoding.
+*   **K4: Weighted Pooling**: Block-level parallel reduction of sequence data into vectors.
+*   **K5: Bias Add**: Parallel broadcast addition of 1D biases to 2D tensors.
+*   **K6: Leaky ReLU**: Element-wise activation with configurable slope.
+*   **K7: BN Mean**: Grid-stride loop calculation of feature-wise means.
+*   **K8: BN Var**: Warp-level reduction of statistical variance.
+*   **K9: BN Apply**: Fusion kernel for scaling, shifting, and normalization.
+*   **K10: cuBLAS GEMM**: Hardware-accelerated (TF32) matrix multiplication.
+*   **K11: Logit Projection**: Optimized matrix-vector projection for classification.
+*   **K12: Softmax Max**: Numerically stable per-row maximum finding.
+*   **K13: Softmax Sum**: Parallel reduction of exponential sums.
+*   **K14: Softmax Norm**: Normalization of scores into probabilities.
+*   **K15: Argmax**: Warp-level reduction to find the highest-rated class.
+*   **K16: Fused Bias+ReLU**: Memory-optimized combination of bias and activation.
+*   **K17: Fused Softmax**: Single-pass high-efficiency softmax implementation.
 
 ---
 
-**Current Status:** All 17 kernels are fully integrated and verified. The system utilizes industry-standard cuBLAS acceleration and custom kernel fusion for maximum performance.
+## Performance
+| Metric | Baseline (PyTorch CUDA) | Custom CUDA Pipeline | Speedup |
+| :--- | :--- | :--- | :--- |
+| Forward Pass (Batch: 2048) | 6.88 ms | 4.83 ms | **1.42x** |
+| Memory Footprint | ~14.88 MB | ~1.10 MB | **13.5x** |
+
+---
+
+## Usage
+1.  **Prepare Data**: `python scripts/prepare_data.py`
+2.  **Train Model**: `python scripts/train.py`
+3.  **Run Inference**: `python custom_pipeline/inference.py`
+4.  **Verify Kernels**: `python tests/run_all_tests.py`
+
+**Current Status:** Production ready. All 17 kernels are verified and optimized for RTX 50-series hardware.

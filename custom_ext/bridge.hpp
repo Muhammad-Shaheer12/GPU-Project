@@ -34,8 +34,9 @@ void launch_batchnorm_apply(const float* input, const float* mean,
                               const float* beta, float* output,
                               int batch, int features, float eps);
 
-void launch_gemm_tiled(const float* A, const float* B, float* C,
-                        int M, int K, int N);
+void launch_gemm_tiled(const float* A, const float* B, float* C, int M, int K, int N);
+void launch_gemm_cublas(const float* A, const float* B, float* C, int M, int K, int N);
+void launch_gemm_custom(const float* A, const float* B, float* C, int M, int K, int N);
 
 void launch_logit_projection(const float* input, const float* weights,
                                float* output, int batch, int hidden, int classes);

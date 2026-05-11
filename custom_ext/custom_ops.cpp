@@ -152,6 +152,26 @@ torch::Tensor fused_softmax(torch::Tensor input) {
     return output;
 }
 
+
+
+torch::Tensor gemm_cublas(torch::Tensor A, torch::Tensor B) {
+    auto M = A.size(0);
+    auto K = A.size(1);
+    auto N = B.size(1);
+    auto C = torch::zeros({M, N}, A.options());
+    launch_gemm_cublas(A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>(), M, K, N);
+    return C;
+}
+
+torch::Tensor gemm_custom(torch::Tensor A, torch::Tensor B) {
+    auto M = A.size(0);
+    auto K = A.size(1);
+    auto N = B.size(1);
+    auto C = torch::zeros({M, N}, A.options());
+    launch_gemm_custom(A.data_ptr<float>(), B.data_ptr<float>(), C.data_ptr<float>(), M, K, N);
+    return C;
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("pad_truncate", &pad_truncate);
     m.def("embedding_lookup", &embedding_lookup);
@@ -163,6 +183,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("batchnorm_var", &batchnorm_var);
     m.def("batchnorm_apply", &batchnorm_apply);
     m.def("gemm_tiled", &gemm_tiled);
+    m.def("gemm_cublas", &gemm_cublas);
+    m.def("gemm_custom", &gemm_custom);
     m.def("logit_projection", &logit_projection);
     m.def("softmax_row_max", &softmax_row_max);
     m.def("softmax_row_sum", &softmax_row_sum);

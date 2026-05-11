@@ -40,7 +40,22 @@ This document consolidates the benchmarking and profiling results for the RTX 50
 | **Bias + Leaky ReLU** | 801.35 µs | 698.64 µs | **1.15x** |
 | **Full Softmax** | 30.80 µs | 10.60 µs | **2.91x** |
 
-## 4. Optimization Highlights
+## 4. GEMM: cuBLAS (Tensor Cores) vs. Custom "Pro" Kernel
+*Measured via `scripts/benchmark_gemm.py` across 100 iterations. The custom kernel utilizes 4x4 Register Tiling.*
+
+| Matrix Size | Metric | cuBLAS (TF32) | Custom (Pro) | Performance Winner |
+| :--- | :--- | :--- | :--- | :--- |
+| **128 x 128** | Latency | 0.0057 ms | 0.0608 ms | **cuBLAS** is 10.68x faster |
+| | TFLOPS | 0.7361 | 0.0689 | |
+| **512 x 512** | Latency | 0.1070 ms | 0.0862 ms | **Custom Kernel** is 1.24x faster! |
+| | TFLOPS | 2.5085 | 3.1154 | |
+| **2048 x 2048**| Latency | 2.0343 ms | 6.5058 ms | **cuBLAS** is 3.20x faster |
+| | TFLOPS | 8.4450 | 2.6407 | |
+
+> [!TIP]
+> **Surprising Result:** While cuBLAS dominates at very small and very large matrix sizes due to its generalized Tensor Core optimization, our **Custom "Pro" Kernel actually beat cuBLAS** by ~24% on medium-sized (512x512) matrices. This demonstrates the power of hand-tuning register tiling for specific workloads!
+
+## 5. Optimization Highlights
 - **cuBLAS Integration**: The GEMM operations are now powered by NVIDIA cuBLAS with TF32 enabled, utilizing Tensor Cores for maximum throughput.
 - **Fused Bias + ReLU**: Consolidates memory-bound operations into a single pass, reducing global memory round-trips.
 - **Fused Softmax**: A single-pass grid launch that handles max, sum, and normalization, significantly reducing kernel launch overhead.

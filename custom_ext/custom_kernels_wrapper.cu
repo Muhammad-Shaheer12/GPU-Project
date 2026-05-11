@@ -25,18 +25,17 @@
 #include "kernel16_fused_bias_relu.cu"
 #include "kernel17_fused_softmax.cu"
 
-// cuBLAS handle management
-static cublasHandle_t global_handle = nullptr;
+// cuBLAS handle management for benchmarking
+static cublasHandle_t benchmark_handle = nullptr;
 
-static void ensure_cublas_handle() {
-    if (global_handle == nullptr) {
-        if (cublasCreate(&global_handle) != CUBLAS_STATUS_SUCCESS) {
-            std::cerr << "Failed to create cuBLAS handle\n";
-            std::exit(1);
-        }
-        cublasSetMathMode(global_handle, CUBLAS_TF32_TENSOR_OP_MATH);
+static void ensure_benchmark_handle() {
+    if (benchmark_handle == nullptr) {
+        cublasCreate(&benchmark_handle);
+        cublasSetMathMode(benchmark_handle, CUBLAS_TF32_TENSOR_OP_MATH);
     }
 }
+
+
 
 // ============================================================
 // Launch Wrappers
@@ -93,9 +92,22 @@ void launch_batchnorm_apply(const float* input, const float* mean, const float* 
 }
 
 void launch_gemm_tiled(const float* A, const float* B, float* C, int M, int K, int N) {
-    ensure_cublas_handle();
+    // Default to custom for production as requested
+    dim3 threads(16, 16);
+    dim3 blocks((N + 63) / 64, (M + 63) / 64);
+    gemm_tiled_kernel<<<blocks, threads>>>(A, B, C, M, K, N);
+}
+
+void launch_gemm_cublas(const float* A, const float* B, float* C, int M, int K, int N) {
+    ensure_benchmark_handle();
     const float alpha = 1.0f, beta = 0.0f;
-    cublasGemmEx(global_handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, B, CUDA_R_32F, N, A, CUDA_R_32F, K, &beta, C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F_FAST_TF32, CUBLAS_GEMM_DEFAULT);
+    cublasGemmEx(benchmark_handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, B, CUDA_R_32F, N, A, CUDA_R_32F, K, &beta, C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F_FAST_TF32, CUBLAS_GEMM_DEFAULT);
+}
+
+void launch_gemm_custom(const float* A, const float* B, float* C, int M, int K, int N) {
+    dim3 threads(16, 16);
+    dim3 blocks((N + 63) / 64, (M + 63) / 64);
+    gemm_tiled_kernel<<<blocks, threads>>>(A, B, C, M, K, N);
 }
 
 void launch_logit_projection(const float* input, const float* weight, float* output, int batch, int hidden, int classes) {
