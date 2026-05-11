@@ -3,248 +3,28 @@
 #include <iostream>
 
 // ============================================================
-// Forward declarations of all __global__ kernel functions
+// Unity Build: Include all kernels directly
+// This simplifies the build system and allows for better optimization.
 // ============================================================
+#include "kernel1_pad_truncate.cu"
+#include "kernel2_embedding_lookup.cu"
+#include "kernel3_positional_encoding.cu"
+#include "kernel4_weighted_mean_pooling.cu"
+#include "kernel5_bias_add.cu"
+#include "kernel6_leaky_relu.cu"
+#include "kernel7_batchnorm_mean.cu"
+#include "kernel8_batchnorm_var.cu"
+#include "kernel9_batchnorm_apply.cu"
+#include "kernel10_gemm_tiled.cu"
+#include "kernel11_logit_projection.cu"
+#include "kernel12_softmax_row_max.cu"
+#include "kernel13_softmax_row_sum.cu"
+#include "kernel14_softmax_normalize.cu"
+#include "kernel15_argmax.cu"
+#include "kernel16_fused_bias_relu.cu"
+#include "kernel17_fused_softmax.cu"
 
-// K1: pad_truncate
-__global__ void pad_truncate_kernel(const int* input_tokens,
-                                    const int* input_lengths,
-                                    int* output_tokens,
-                                    int batch,
-                                    int input_stride,
-                                    int fixed_len,
-                                    int pad_token);
-
-// K2: embedding_lookup
-__global__ void embedding_lookup_kernel(const int* __restrict__ tokens,
-                                        const float* __restrict__ embedding,
-                                        float* __restrict__ output,
-                                        int total_tokens,
-                                        int dim,
-                                        int vocab,
-                                        int unk_id);
-
-// K3: positional_encoding
-__global__ void positional_encoding_kernel(const float* __restrict__ input,
-                                           float* __restrict__ output,
-                                           int total_tokens,
-                                           int dim);
-
-// K4: weighted_mean_pooling
-__global__ void weighted_mean_pooling_kernel(const float* __restrict__ input,
-                                             const float* __restrict__ weights,
-                                             float* __restrict__ output,
-                                             int batch,
-                                             int seq_len,
-                                             int dim);
-
-// K5: bias_add
-__global__ void bias_add_kernel(const float* __restrict__ input,
-                                const float* __restrict__ bias,
-                                float* __restrict__ output,
-                                int rows,
-                                int cols);
-
-// K6: leaky_relu
-__global__ void leaky_relu_kernel(const float* __restrict__ input,
-                                  float* __restrict__ output,
-                                  int total,
-                                  float alpha);
-
-// K7: batchnorm_mean
-__global__ void batchnorm_mean_kernel(const float* __restrict__ input,
-                                      float* __restrict__ mean,
-                                      int batch,
-                                      int features);
-
-// K8: batchnorm_var
-__global__ void batchnorm_var_kernel(const float* __restrict__ input,
-                                     const float* __restrict__ mean,
-                                     float* __restrict__ var,
-                                     int batch,
-                                     int features);
-
-// K9: batchnorm_apply
-__global__ void batchnorm_apply_kernel(const float* __restrict__ input,
-                                       const float* __restrict__ mean,
-                                       const float* __restrict__ var,
-                                       const float* __restrict__ gamma,
-                                       const float* __restrict__ beta,
-                                       float* __restrict__ output,
-                                       int batch,
-                                       int features,
-                                       float eps);
-
-// K10: gemm_tiled
-constexpr int TILE = 16;
-__global__ void gemm_tiled_kernel(const float* __restrict__ A,
-                                  const float* __restrict__ B,
-                                  float* __restrict__ C,
-                                  int M,
-                                  int K,
-                                  int N);
-
-// K11: logit_projection
-__global__ void logit_projection_kernel(const float* __restrict__ input,
-                                        const float* __restrict__ weights,
-                                        float* __restrict__ output,
-                                        int batch,
-                                        int hidden,
-                                        int classes);
-
-// K12: softmax_row_max
-__global__ void softmax_row_max_kernel(const float* __restrict__ input,
-                                       float* __restrict__ row_max,
-                                       int batch,
-                                       int classes);
-
-// K13: softmax_row_sum
-__global__ void softmax_row_sum_kernel(const float* __restrict__ input,
-                                       const float* __restrict__ row_max,
-                                       float* __restrict__ row_sum,
-                                       int batch,
-                                       int classes);
-
-// K14: softmax_normalize
-__global__ void softmax_normalize_kernel(const float* __restrict__ input,
-                                         const float* __restrict__ row_max,
-                                         const float* __restrict__ row_sum,
-                                         float* __restrict__ output,
-                                         int batch,
-                                         int classes);
-
-// K15: argmax
-__global__ void argmax_kernel(const float* __restrict__ input,
-                              int* __restrict__ output,
-                              int batch,
-                              int classes);
-
-// K16: fused_bias_leaky_relu
-__global__ void bias_leaky_relu_kernel(const float* __restrict__ input,
-                                       const float* __restrict__ bias,
-                                       float* __restrict__ output,
-                                       int rows,
-                                       int cols,
-                                       float alpha);
-
-// K17: fused_softmax
-__global__ void softmax_fused_kernel(const float* __restrict__ input,
-                                     float* __restrict__ output,
-                                     int batch,
-                                     int classes);
-
-
-// ============================================================
-// Launch wrapper functions (called from custom_ops.cpp)
-// ============================================================
-
-void launch_pad_truncate(const int* input_tokens,
-                         const int* input_lengths,
-                         int* output_tokens,
-                         int batch,
-                         int input_stride,
-                         int fixed_len,
-                         int pad_token) {
-    int total = batch * fixed_len;
-    const int threads = 256;
-    const int blocks = (total + threads - 1) / threads;
-    pad_truncate_kernel<<<blocks, threads>>>(
-        input_tokens, input_lengths, output_tokens,
-        batch, input_stride, fixed_len, pad_token);
-}
-
-void launch_embedding_lookup(const int* tokens,
-                              const float* embedding,
-                              float* output,
-                              int total_tokens,
-                              int dim,
-                              int vocab,
-                              int unk_id) {
-    dim3 block(16, 8, 1); // 16 lanes * 4 dims = 64 dims; 8 tokens per block
-    dim3 grid(1, (total_tokens + block.y - 1) / block.y, 1);
-    embedding_lookup_kernel<<<grid, block>>>(
-        tokens, embedding, output, total_tokens, dim, vocab, unk_id);
-}
-
-void launch_positional_encoding(const float* input,
-                                 float* output,
-                                 int total_tokens,
-                                 int dim) {
-    const int threads = 256;
-    int total = total_tokens * dim;
-    const int blocks = (total + threads - 1) / threads;
-    positional_encoding_kernel<<<blocks, threads>>>(input, output, total_tokens, dim);
-}
-
-void launch_weighted_mean_pooling(const float* input,
-                                   const float* weights,
-                                   float* output,
-                                   int batch,
-                                   int seq_len,
-                                   int dim) {
-    dim3 block(seq_len, 1, 1);
-    dim3 grid(batch, dim, 1);
-    size_t shared_bytes = static_cast<size_t>(seq_len) * sizeof(float) * 2;
-    weighted_mean_pooling_kernel<<<grid, block, shared_bytes>>>(
-        input, weights, output, batch, seq_len, dim);
-}
-
-void launch_bias_add(const float* input,
-                      const float* bias,
-                      float* output,
-                      int rows,
-                      int cols) {
-    int total = rows * cols;
-    const int threads = 256;
-    const int blocks = (total + threads - 1) / threads;
-    bias_add_kernel<<<blocks, threads>>>(input, bias, output, rows, cols);
-}
-
-void launch_leaky_relu(const float* input,
-                        float* output,
-                        int total,
-                        float alpha) {
-    const int threads = 256;
-    const int blocks = (total + threads - 1) / threads;
-    leaky_relu_kernel<<<blocks, threads>>>(input, output, total, alpha);
-}
-
-void launch_batchnorm_mean(const float* input,
-                            float* mean,
-                            int batch,
-                            int features) {
-    const int threads = 256;
-    const int blocks = features;
-    batchnorm_mean_kernel<<<blocks, threads>>>(input, mean, batch, features);
-}
-
-void launch_batchnorm_var(const float* input,
-                           const float* mean,
-                           float* var,
-                           int batch,
-                           int features) {
-    const int threads = 256;
-    const int blocks = features;
-    batchnorm_var_kernel<<<blocks, threads>>>(input, mean, var, batch, features);
-}
-
-void launch_batchnorm_apply(const float* input,
-                              const float* mean,
-                              const float* var,
-                              const float* gamma,
-                              const float* beta,
-                              float* output,
-                              int batch,
-                              int features,
-                              float eps) {
-    int total = batch * features;
-    const int threads = 256;
-    const int blocks = (total + threads - 1) / threads;
-    batchnorm_apply_kernel<<<blocks, threads>>>(
-        input, mean, var, gamma, beta, output, batch, features, eps);
-}
-
-// Static handle to avoid creation overhead
+// cuBLAS handle management
 static cublasHandle_t global_handle = nullptr;
 
 static void ensure_cublas_handle() {
@@ -253,122 +33,99 @@ static void ensure_cublas_handle() {
             std::cerr << "Failed to create cuBLAS handle\n";
             std::exit(1);
         }
-        // Enable TF32 for Tensor Cores on Ampere+ (RTX 5060)
         cublasSetMathMode(global_handle, CUBLAS_TF32_TENSOR_OP_MATH);
     }
 }
 
-void launch_gemm_tiled(const float* A,
-                        const float* B,
-                        float* C,
-                        int M,
-                        int K,
-                        int N) {
-    ensure_cublas_handle();
+// ============================================================
+// Launch Wrappers
+// ============================================================
 
-    const float alpha = 1.0f;
-    const float beta = 0.0f;
-
-    // cuBLAS is column-major. PyTorch is row-major.
-    // To compute C = A * B (row-major):
-    // C^T = B^T * A^T (column-major)
-    
-    cublasStatus_t status = cublasGemmEx(
-        global_handle,
-        CUBLAS_OP_N, 
-        CUBLAS_OP_N, 
-        N,           // rows of C^T
-        M,           // cols of C^T
-        K,           // inner dim
-        &alpha,
-        B, CUDA_R_32F, N,
-        A, CUDA_R_32F, K,
-        &beta,
-        C, CUDA_R_32F, N,
-        CUBLAS_COMPUTE_32F_FAST_TF32,
-        CUBLAS_GEMM_DEFAULT
-    );
-
-    if (status != CUBLAS_STATUS_SUCCESS) {
-        std::cerr << "cuBLAS GEMM failed with status: " << status << "\n";
-    }
-}
-
-void launch_logit_projection(const float* input,
-                               const float* weights,
-                               float* output,
-                               int batch,
-                               int hidden,
-                               int classes) {
-    int total = batch * classes;
+void launch_pad_truncate(const int* input, const int* lengths, int* output, int batch, int stride, int fixed_len, int pad_token) {
     const int threads = 256;
-    const int blocks = (total + threads - 1) / threads;
-    logit_projection_kernel<<<blocks, threads>>>(
-        input, weights, output, batch, hidden, classes);
+    int blocks = (batch * fixed_len + threads - 1) / threads;
+    pad_truncate_kernel<<<blocks, threads>>>(input, lengths, output, batch, stride, fixed_len, pad_token);
 }
 
-void launch_softmax_row_max(const float* input,
-                              float* row_max,
-                              int batch,
-                              int classes) {
-    const int threads = 32;
-    const int blocks = batch;
-    softmax_row_max_kernel<<<blocks, threads>>>(
-        input, row_max, batch, classes);
-}
-
-void launch_softmax_row_sum(const float* input,
-                              const float* row_max,
-                              float* row_sum,
-                              int batch,
-                              int classes) {
-    const int threads = 32;
-    const int blocks = batch;
-    softmax_row_sum_kernel<<<blocks, threads>>>(
-        input, row_max, row_sum, batch, classes);
-}
-
-void launch_softmax_normalize(const float* input,
-                                const float* row_max,
-                                const float* row_sum,
-                                float* output,
-                                int batch,
-                                int classes) {
-    int total = batch * classes;
+void launch_embedding_lookup(const int* tokens, const float* embedding, float* output, int total_tokens, int dim, int vocab, int unk_id) {
     const int threads = 256;
-    const int blocks = (total + threads - 1) / threads;
-    softmax_normalize_kernel<<<blocks, threads>>>(
-        input, row_max, row_sum, output, batch, classes);
+    int blocks = (total_tokens * dim + threads - 1) / threads;
+    embedding_lookup_kernel<<<blocks, threads>>>(tokens, embedding, output, total_tokens, dim, vocab, unk_id);
 }
 
-void launch_argmax(const float* input,
-                    int* output,
-                    int batch,
-                    int classes) {
-    const int threads = 32;
-    const int blocks = batch;
-    argmax_kernel<<<blocks, threads>>>(
-        input, output, batch, classes);
-}
-
-void launch_fused_bias_leaky_relu(const float* input,
-                                  const float* bias,
-                                  float* output,
-                                  int rows,
-                                  int cols,
-                                  float alpha) {
+void launch_positional_encoding(const float* input, float* output, int total_tokens, int dim) {
     const int threads = 256;
-    int total = rows * cols;
+    int blocks = (total_tokens * dim + threads - 1) / threads;
+    positional_encoding_kernel<<<blocks, threads>>>(input, output, total_tokens, dim);
+}
+
+void launch_weighted_mean_pooling(const float* input, const float* weights, float* output, int batch, int seq_len, int dim) {
+    const int threads = 256;
+    int blocks = (batch * dim + threads - 1) / threads;
+    weighted_mean_pooling_kernel<<<blocks, threads>>>(input, weights, output, batch, seq_len, dim);
+}
+
+void launch_bias_add(const float* input, const float* bias, float* output, int rows, int cols) {
+    const int threads = 256;
+    int blocks = (rows * cols + threads - 1) / threads;
+    bias_add_kernel<<<blocks, threads>>>(input, bias, output, rows, cols);
+}
+
+void launch_leaky_relu(const float* input, float* output, int total, float alpha) {
+    const int threads = 256;
     int blocks = (total + threads - 1) / threads;
-    // Fused kernel uses float4, so we adjust blocks if needed, but the kernel handles tailing
+    leaky_relu_kernel<<<blocks, threads>>>(input, output, total, alpha);
+}
+
+void launch_batchnorm_mean(const float* input, float* mean, int batch, int features) {
+    batchnorm_mean_kernel<<<features, 256>>>(input, mean, batch, features);
+}
+
+void launch_batchnorm_var(const float* input, const float* mean, float* var, int batch, int features) {
+    batchnorm_var_kernel<<<features, 256>>>(input, mean, var, batch, features);
+}
+
+void launch_batchnorm_apply(const float* input, const float* mean, const float* var, const float* gamma, const float* beta, float* output, int batch, int features, float eps) {
+    const int threads = 256;
+    int blocks = (batch * features + threads - 1) / threads;
+    batchnorm_apply_kernel<<<blocks, threads>>>(input, mean, var, gamma, beta, output, batch, features, eps);
+}
+
+void launch_gemm_tiled(const float* A, const float* B, float* C, int M, int K, int N) {
+    ensure_cublas_handle();
+    const float alpha = 1.0f, beta = 0.0f;
+    cublasGemmEx(global_handle, CUBLAS_OP_N, CUBLAS_OP_N, N, M, K, &alpha, B, CUDA_R_32F, N, A, CUDA_R_32F, K, &beta, C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F_FAST_TF32, CUBLAS_GEMM_DEFAULT);
+}
+
+void launch_logit_projection(const float* input, const float* weight, float* output, int batch, int hidden, int classes) {
+    const int threads = 32;
+    logit_projection_kernel<<<batch, threads>>>(input, weight, output, batch, hidden, classes);
+}
+
+void launch_softmax_row_max(const float* input, float* output, int batch, int classes) {
+    softmax_row_max_kernel<<<batch, 32>>>(input, output, batch, classes);
+}
+
+void launch_softmax_row_sum(const float* input, const float* row_max, float* output, int batch, int classes) {
+    softmax_row_sum_kernel<<<batch, 32>>>(input, row_max, output, batch, classes);
+}
+
+void launch_softmax_normalize(const float* input, const float* row_max, const float* row_sum, float* output, int batch, int classes) {
+    const int threads = 256;
+    int blocks = (batch * classes + threads - 1) / threads;
+    softmax_normalize_kernel<<<blocks, threads>>>(input, row_max, row_sum, output, batch, classes);
+}
+
+void launch_argmax(const float* input, int* output, int batch, int classes) {
+    argmax_kernel<<<batch, 32>>>(input, output, batch, classes);
+}
+
+void launch_fused_bias_leaky_relu(const float* input, const float* bias, float* output, int rows, int cols, float alpha) {
+    const int threads = 256;
+    int blocks = (rows * cols + threads - 1) / threads;
     bias_leaky_relu_kernel<<<blocks, threads>>>(input, bias, output, rows, cols, alpha);
 }
 
-void launch_fused_softmax(const float* input,
-                           float* output,
-                           int batch,
-                           int classes) {
-    const int threads = 32;
-    size_t shared_bytes = 2 * sizeof(float);
-    softmax_fused_kernel<<<batch, threads, shared_bytes>>>(input, output, batch, classes);
+void launch_fused_softmax(const float* input, float* output, int batch, int classes) {
+    softmax_fused_kernel<<<batch, 32, 2 * sizeof(float)>>>(input, output, batch, classes);
 }
